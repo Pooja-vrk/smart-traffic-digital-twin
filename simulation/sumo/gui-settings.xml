@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<viewsettings xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/viewsettings_file.xsd">
+    <scheme name="real world">
+        <opengl>
+            <antialiasing value="true"/>
+            <dither value="true"/>
+        </opengl>
+        <background backgroundColor="50,50,50" showGrid="false"/>
+        <edges laneEdgeColor="false" laneShowBorders="true" showLane2Lane="true"/>
+        <vehicles vehicleColor="given" vehicleQuality="2" showBlinker="true"/>
+        <junctions showLane2Lane="true" drawLinkJunctionIndex="true"/>
+    </scheme>
+    <viewport zoom="450" x="300" y="300"/>
+    <delay value="50"/>
+</viewsettings>

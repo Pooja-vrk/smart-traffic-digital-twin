@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# Testing and Type Checking
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Environment and Secrets
+.env
+.env.*
+!.env.example
+
+# Node / Frontend
+node_modules/
+dist/
+build/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# AI Models and Checkpoints (Preserve folder structure via .gitkeep)
+ai/models/*.pt
+ai/models/*.pth
+ai/models/*.onnx
+ai/models/*.h5
+*.pt
+*.pth
+*.pkl
+
+# SUMO Simulation Outputs & Temporary files
+simulation/sumo/*.out.xml
+simulation/sumo/*.tripinfo.xml
+simulation/sumo/*.summary.xml
+simulation/sumo/*.dump.xml
+simulation/sumo/*.log
+*.traci.log
+
+# Data artifacts & Experiments (Preserve folder structure via .gitkeep)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+data/experiments/*
+!data/experiments/.gitkeep
+
+# Logs and General Temp Files
+logs/
+*.log
+*.tmp
+*.temp
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
