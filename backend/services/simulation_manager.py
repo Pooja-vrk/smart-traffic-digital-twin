@@ -92,6 +92,10 @@ class SimulationManager:
         self._scheduled_emergency: Optional[Dict[str, Any]] = None
         self._emergency_counter: int = 0
 
+        # Multi-intersection coordination settings
+        self._coordination_mode: str = "ARTERY_EW"
+        self._env: Optional[Any] = None
+
         # Event loop reference for WebSocket dispatching from worker thread
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -392,6 +396,67 @@ class SimulationManager:
                 "emergency": emer,
             }
 
+    def get_coordination_status(self) -> Dict[str, Any]:
+        """Return instantaneous multi-intersection coordination status and metrics."""
+        with self._lock:
+            if self._latest_snapshot is not None and self._latest_snapshot.coordination is not None:
+                return {
+                    "simulation_id": self._simulation_id,
+                    "running": self.is_running(),
+                    "coordination": self._latest_snapshot.coordination.model_dump(),
+                }
+
+            if self._env is not None and hasattr(self._env, "get_coordination_state"):
+                c_state = self._env.get_coordination_state()
+                return {
+                    "simulation_id": self._simulation_id,
+                    "running": self.is_running(),
+                    "coordination": c_state.to_dict() if hasattr(c_state, "to_dict") else vars(c_state),
+                }
+
+            from simulation.coordination import MultiIntersectionCoordinator
+            dummy_coord = MultiIntersectionCoordinator(mode=self._coordination_mode)
+            return {
+                "simulation_id": self._simulation_id,
+                "running": self.is_running(),
+                "coordination": dummy_coord.get_state().to_dict(),
+            }
+
+    def set_coordination_mode(self, mode: str) -> Dict[str, Any]:
+        """Dynamically update multi-intersection coordination policy mode."""
+        valid_modes = {"ARTERY_EW", "ARTERY_NS", "BALANCED_ADAPTIVE", "ISOLATED"}
+        mode_upper = mode.upper().strip()
+        if mode_upper not in valid_modes:
+            raise ValueError(f"Invalid coordination mode '{mode}'. Valid modes: {sorted(list(valid_modes))}")
+
+        with self._lock:
+            self._coordination_mode = mode_upper
+            if self._env is not None and hasattr(self._env, "coordinator"):
+                self._env.coordinator.set_mode(mode_upper)
+                c_state = self._env.get_coordination_state()
+                data_dict = c_state.to_dict() if hasattr(c_state, "to_dict") else vars(c_state)
+            else:
+                from simulation.coordination import MultiIntersectionCoordinator
+                dummy_coord = MultiIntersectionCoordinator(mode=mode_upper)
+                data_dict = dummy_coord.get_state().to_dict()
+
+            sim_id = self._simulation_id or ""
+            if self._main_loop and self.is_running():
+                ws_msg = TelemetryService.create_websocket_message(
+                    msg_type="coordination_update",
+                    simulation_id=sim_id,
+                    data=data_dict,
+                )
+                ws_manager.broadcast_from_thread(ws_msg, self._main_loop)
+
+            return {
+                "status": "success",
+                "simulation_id": sim_id,
+                "mode": mode_upper,
+                "message": f"Multi-intersection coordination mode switched to '{mode_upper}'.",
+                "coordination": data_dict,
+            }
+
     def _run_simulation_worker(
         self,
         sim_id: str,
@@ -415,6 +480,10 @@ class SimulationManager:
                 controller=controller,
                 simulation_id=sim_id,
             )
+            with self._lock:
+                self._env = env
+                if hasattr(env, "coordinator"):
+                    env.coordinator.set_mode(self._coordination_mode)
 
             initial_state = env.start()
             prev_phase = initial_state.current_phase
@@ -424,6 +493,7 @@ class SimulationManager:
                 self._simulation_time = initial_state.simulation_time
                 self._current_step = initial_state.step
                 self._peak_queue = initial_state.total_queue
+                coord_init = env.get_coordination_state() if hasattr(env, "get_coordination_state") else None
                 self._latest_snapshot = TelemetryService.create_snapshot(
                     state=initial_state,
                     metrics=None,
@@ -431,6 +501,7 @@ class SimulationManager:
                     simulation_id=sim_id,
                     peak_queue=self._peak_queue,
                     agentic_decision=env.get_latest_decision(),
+                    coordination_state=coord_init,
                 )
 
             # Persist initial traffic snapshot
@@ -474,6 +545,7 @@ class SimulationManager:
                 next_state = env.step()
                 step_metrics = env.get_metrics()
                 decision = env.get_latest_decision()
+                coord_state = env.get_coordination_state() if hasattr(env, "get_coordination_state") else None
 
                 with self._lock:
                     self._current_step = step_num
@@ -486,6 +558,7 @@ class SimulationManager:
                         simulation_id=sim_id,
                         peak_queue=self._peak_queue,
                         agentic_decision=decision,
+                        coordination_state=coord_state,
                     )
                     self._latest_snapshot = snapshot
 
@@ -591,6 +664,7 @@ class SimulationManager:
             # Record in-memory final results
             with self._lock:
                 self._status = final_status
+                self._env = None
                 self._scheduled_emergency = None
                 if final_status == "completed" and aggregate_metrics is not None:
                     self._last_result = SimulationResultResponse(

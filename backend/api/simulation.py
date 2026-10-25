@@ -14,6 +14,8 @@ from backend.schemas.simulation import (
     SimulationRunDetail,
     EmergencyVehicleRequest,
     EmergencyVehicleResponse,
+    CoordinationModeRequest,
+    CoordinationModeResponse,
     SimulationStartRequest,
     SimulationStartResponse,
     SimulationStatusResponse,
@@ -147,6 +149,32 @@ async def trigger_emergency_vehicle_for_sim(
 async def get_emergency_status() -> dict:
     """Retrieve current scheduled and active emergency vehicle state."""
     return sim_manager.get_emergency_status()
+
+
+@router.get(
+    "/coordination",
+    summary="Get Multi-Intersection Coordination Telemetry",
+)
+async def get_coordination_status() -> dict:
+    """Retrieve instantaneous multi-intersection arterial progression and neighbor signal states."""
+    return sim_manager.get_coordination_status()
+
+
+@router.post(
+    "/coordination/mode",
+    response_model=CoordinationModeResponse,
+    summary="Set Multi-Intersection Coordination Mode",
+)
+async def set_coordination_mode(request: CoordinationModeRequest) -> CoordinationModeResponse:
+    """Dynamically set the multi-intersection coordination policy mode."""
+    try:
+        result = sim_manager.set_coordination_mode(request.mode)
+        return CoordinationModeResponse(**result)
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(err),
+        )
 
 
 @router.get(

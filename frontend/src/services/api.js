@@ -54,6 +54,16 @@ export const getEmergencyStatus = async () => {
   return response.data;
 };
 
+export const getCoordinationStatus = async () => {
+  const response = await api.get('/api/simulation/coordination');
+  return response.data;
+};
+
+export const setCoordinationMode = async (mode) => {
+  const response = await api.post('/api/simulation/coordination/mode', { mode });
+  return response.data;
+};
+
 export const getSimulationHistory = async (params = {}) => {
   const response = await api.get('/api/simulation/history', { params });
   return response.data;

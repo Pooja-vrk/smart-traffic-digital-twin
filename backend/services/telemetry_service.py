@@ -7,11 +7,15 @@ from typing import Any, Dict, Optional
 
 from backend.schemas.traffic import (
     AIDecisionInfo,
+    CoordinatedNeighborInfo,
+    CorridorProgressionInfo,
     EmergencyLiveInfo,
+    MultiIntersectionCoordinationInfo,
     PredictionLiveInfo,
     QueuesInfo,
     SignalInfo,
     SpeedInfo,
+    SpillbackMitigationInfo,
     TrafficSnapshotResponse,
     VehicleLiveState,
     VehiclesInfo,
@@ -44,6 +48,7 @@ class TelemetryService:
         simulation_id: Optional[str] = None,
         peak_queue: int = 0,
         agentic_decision: Optional[Any] = None,
+        coordination_state: Optional[Any] = None,
     ) -> TrafficSnapshotResponse:
         """Construct a standardized TrafficSnapshotResponse from live simulation state and metrics."""
         phase_idx = state.current_phase
@@ -210,6 +215,65 @@ class TelemetryService:
         except Exception:
             prediction_info = PredictionLiveInfo(model_available=False)
 
+        # Multi-intersection arterial coordination live telemetry
+        coord_info: Optional[MultiIntersectionCoordinationInfo] = None
+        if coordination_state is not None:
+            try:
+                if hasattr(coordination_state, "to_dict"):
+                    c_dict = coordination_state.to_dict()
+                elif isinstance(coordination_state, dict):
+                    c_dict = coordination_state
+                else:
+                    from dataclasses import asdict, is_dataclass
+                    if is_dataclass(coordination_state):
+                        c_dict = asdict(coordination_state)
+                    else:
+                        c_dict = {
+                            "primary_intersection_id": getattr(coordination_state, "primary_intersection_id", "INT-001"),
+                            "primary_tls_id": getattr(coordination_state, "primary_tls_id", "center"),
+                            "mode": getattr(coordination_state, "mode", "ARTERY_EW"),
+                            "cycle_length": getattr(coordination_state, "cycle_length", 60.0),
+                            "neighbors": getattr(coordination_state, "neighbors", {}),
+                            "metrics": getattr(coordination_state, "metrics", {}),
+                            "emergency_active": getattr(coordination_state, "emergency_active", False),
+                            "emergency_approach": getattr(coordination_state, "emergency_approach", None),
+                        }
+
+                neighbors_dict = {}
+                for k, n in c_dict.get("neighbors", {}).items():
+                    if isinstance(n, dict):
+                        neighbors_dict[k] = CoordinatedNeighborInfo(**n)
+                    elif hasattr(n, "__dict__"):
+                        from dataclasses import asdict, is_dataclass
+                        n_data = asdict(n) if is_dataclass(n) else vars(n)
+                        neighbors_dict[k] = CoordinatedNeighborInfo(**n_data)
+                    else:
+                        neighbors_dict[k] = n
+
+                m_data = c_dict.get("metrics", {})
+                if isinstance(m_data, dict):
+                    metrics_obj = CorridorProgressionInfo(**m_data)
+                elif hasattr(m_data, "__dict__"):
+                    from dataclasses import asdict, is_dataclass
+                    m_data_dict = asdict(m_data) if is_dataclass(m_data) else vars(m_data)
+                    metrics_obj = CorridorProgressionInfo(**m_data_dict)
+                else:
+                    metrics_obj = m_data
+
+                coord_info = MultiIntersectionCoordinationInfo(
+                    primary_intersection_id=c_dict.get("primary_intersection_id", "INT-001"),
+                    primary_tls_id=c_dict.get("primary_tls_id", "center"),
+                    mode=c_dict.get("mode", "ARTERY_EW"),
+                    cycle_length=float(c_dict.get("cycle_length", 60.0)),
+                    neighbors=neighbors_dict,
+                    metrics=metrics_obj,
+                    emergency_active=bool(c_dict.get("emergency_active", False)),
+                    emergency_approach=c_dict.get("emergency_approach"),
+                    spillback_mitigation=getattr(metrics_obj, "spillback_mitigation", None),
+                )
+            except Exception:
+                coord_info = None
+
         return TrafficSnapshotResponse(
             simulation_id=simulation_id,
             simulation_time=state.simulation_time,
@@ -244,6 +308,7 @@ class TelemetryService:
             ai=ai_info,
             emergency=emergency_info,
             prediction=prediction_info,
+            coordination=coord_info,
             decision=agentic_decision.to_dict() if agentic_decision is not None and hasattr(agentic_decision, "to_dict") else None,
         )
 

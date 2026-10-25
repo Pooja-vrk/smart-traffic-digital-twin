@@ -16,6 +16,7 @@ import SimulationControl  from '../components/dashboard/SimulationControl';
 import EmergencyControlPanel from '../components/dashboard/EmergencyControlPanel';
 import SystemStatus       from '../components/dashboard/SystemStatus';
 import DigitalTwinIntersection from '../components/dashboard/DigitalTwinIntersection';
+import MultiIntersectionCoordination from '../components/dashboard/MultiIntersectionCoordination';
 import AgentStatus        from '../components/dashboard/AgentStatus';
 import TrafficMetricsChart from '../components/dashboard/TrafficMetricsChart';
 import LiveTrafficFeed    from '../components/dashboard/LiveTrafficFeed';
@@ -203,6 +204,12 @@ const Simulation = () => {
 
           {/* Digital Twin */}
           <DigitalTwinIntersection
+            trafficData={trafficData}
+            simulationStatus={simulationStatus}
+          />
+
+          {/* Multi-Intersection Network Coordination */}
+          <MultiIntersectionCoordination
             trafficData={trafficData}
             simulationStatus={simulationStatus}
           />

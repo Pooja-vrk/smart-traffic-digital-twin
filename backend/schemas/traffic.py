@@ -98,22 +98,6 @@ class EmergencyLiveInfo(BaseModel):
     delay_seconds: Optional[float] = Field(default=None, description="Intersection delay experienced by emergency vehicle")
 
 
-class TrafficSnapshotResponse(BaseModel):
-    """Complete consolidated traffic telemetry snapshot for REST queries and WebSocket broadcasts."""
-    simulation_id: Optional[str] = Field(default=None, description="Identifier of current simulation run")
-    simulation_time: float = Field(default=0.0, description="Elapsed simulation time in seconds")
-    step: int = Field(default=0, description="Current simulation step integer")
-    controller: str = Field(default="fixed", description="Active traffic controller identifier")
-    vehicles: VehiclesInfo = Field(default_factory=VehiclesInfo)
-    vehicles_data: List[VehicleLiveState] = Field(default_factory=list, description="Live per-vehicle positions and telemetry")
-    queues: QueuesInfo = Field(default_factory=QueuesInfo)
-    speed: SpeedInfo = Field(default_factory=SpeedInfo)
-    waiting: WaitingInfo = Field(default_factory=WaitingInfo)
-    signal: SignalInfo = Field(default_factory=SignalInfo)
-    ai: Optional[AIDecisionInfo] = Field(default=None, description="Present when DQN controller is running")
-    emergency: Optional[EmergencyLiveInfo] = Field(default=None, description="Live emergency vehicle intelligence state")
-
-
 class PredictionLiveInfo(BaseModel):
     """Real-time 30-second congestion forecast and empirical confidence interval."""
     model_config = ConfigDict(protected_namespaces=())
@@ -138,6 +122,76 @@ class PredictionLiveInfo(BaseModel):
     last_verified_predicted: Optional[float] = Field(default=None, description="Predicted score matching the latest verified snapshot")
 
 
+class CoordinatedNeighborInfo(BaseModel):
+    """Live state of a neighboring coordinated intersection (simulated coordination intent)."""
+    intersection_id: str = Field(..., description="Neighbor junction identifier (e.g. INT-N, INT-E)")
+    name: str = Field(..., description="Human-readable name")
+    direction: str = Field(..., description="Approach direction relative to center ('north', 'south', 'east', 'west')")
+    corridor: str = Field(..., description="Corridor classification ('NS' or 'EW')")
+    distance_meters: float = Field(default=289.60, description="Connecting link distance in meters")
+    ideal_travel_time_seconds: float = Field(default=20.85, description="Free-flow travel time between junctions")
+    current_offset_seconds: float = Field(default=0.0, description="Coordinated phase progression offset in seconds")
+    current_phase: int = Field(default=0, description="Active phase index")
+    phase_name: str = Field(default="GREEN", description="Descriptive phase name")
+    signal_state: str = Field(default="green", description="Signal state ('green', 'yellow', 'red')")
+    coordination_intent: str = Field(default="green", description="Simulated signal state intent ('green', 'yellow', 'red')")
+    is_physical_tls: bool = Field(default=False, description="Whether this node is a physical SUMO TLS (false for simulated gateways)")
+    time_in_phase: float = Field(default=0.0, description="Elapsed seconds in active phase")
+    queue_length: int = Field(default=0, description="Halted queue count on connecting link")
+    vehicle_count: int = Field(default=0, description="Total active vehicles on link")
+    progression_status: str = Field(default="SYNCHRONIZED", description="Coordination progression status")
+    preemption_active: bool = Field(default=False, description="Whether emergency preemption is engaged on this signal")
+    coordination_role: str = Field(default="PEER", description="Role: 'UPSTREAM', 'DOWNSTREAM', 'PEER', 'ISOLATED'")
+
+
+class SpillbackMitigationInfo(BaseModel):
+    """Explicit mitigation control decision for link queue spillback."""
+    active: bool = Field(default=False, description="Whether spillback mitigation is actively engaged")
+    approach: Optional[str] = Field(default=None, description="Approach experiencing bottleneck queue")
+    queue_length: int = Field(default=0, description="Halted queue vehicle count")
+    threshold: int = Field(default=14, description="Queue threshold triggering mitigation")
+    action: str = Field(default="NONE", description="Mitigation control action")
+    metering_rate_factor: float = Field(default=1.0, description="Upstream inflow metering factor (1.0 = unrestricted)")
+    green_extension_seconds: float = Field(default=0.0, description="Primary green extension seconds")
+    explanation: str = Field(default="No spillback detected on connecting approach links.", description="Rationale for decision")
+
+
+class CorridorProgressionInfo(BaseModel):
+    """Quantitative progression and synchronization efficiency metrics across corridors."""
+    # Heuristic Algorithmic Scores (0-100%, 0 in ISOLATED mode)
+    arterial_ew_sync_score: float = Field(default=85.0, description="Heuristic estimate of East-West arterial green wave sync (0-100%)")
+    arterial_ns_sync_score: float = Field(default=80.0, description="Heuristic estimate of North-South transit corridor sync (0-100%)")
+    overall_quality_score: float = Field(default=82.5, description="Heuristic composite coordination quality score (0-100%)")
+    platoon_arrival_efficiency: float = Field(default=78.0, description="Heuristic estimate of vehicles arriving on green (0-100%)")
+
+    # Directly Observed TraCI Measurements
+    observed_mean_speed_mps: float = Field(default=13.89, description="Directly measured average vehicle speed from TraCI")
+    observed_max_queue: int = Field(default=0, description="Directly measured worst-approach halted queue count")
+    observed_total_queue: int = Field(default=0, description="Directly measured total halted queue count")
+
+    progression_speed_mps: float = Field(default=13.89, description="Target progression speed in m/s")
+    cycle_length_seconds: float = Field(default=60.0, description="Network coordinated cycle length in seconds")
+    active_corridor: str = Field(default="EAST_WEST", description="Dominant synchronized corridor")
+    spillback_risk: str = Field(default="LOW", description="Link spillback risk ('LOW', 'MODERATE', 'HIGH')")
+    coordination_mode: str = Field(default="ARTERY_EW", description="Active coordination policy mode")
+    is_coordinated: bool = Field(default=True, description="Whether progressive coordination is active (False in ISOLATED mode)")
+    emergency_preempted_corridor: Optional[str] = Field(default=None, description="Corridor preempted by emergency vehicle")
+    spillback_mitigation: SpillbackMitigationInfo = Field(default_factory=SpillbackMitigationInfo, description="Explicit spillback decision")
+
+
+class MultiIntersectionCoordinationInfo(BaseModel):
+    """Real-time multi-intersection network coordination telemetry."""
+    primary_intersection_id: str = Field(default="INT-001", description="Primary signalized junction ID")
+    primary_tls_id: str = Field(default="center", description="SUMO TLS ID (physical actuator)")
+    mode: str = Field(default="ARTERY_EW", description="Coordination mode")
+    cycle_length: float = Field(default=60.0, description="Coordinated cycle length in seconds")
+    neighbors: Dict[str, CoordinatedNeighborInfo] = Field(default_factory=dict, description="Coordinated neighbor intersections")
+    metrics: CorridorProgressionInfo = Field(default_factory=CorridorProgressionInfo, description="Arterial progression metrics")
+    emergency_active: bool = Field(default=False, description="Whether coordinated emergency preemption is active")
+    emergency_approach: Optional[str] = Field(default=None, description="Approach corridor receiving emergency preemption")
+    spillback_mitigation: Optional[SpillbackMitigationInfo] = Field(default=None, description="Explicit spillback mitigation decision")
+
+
 class TrafficSnapshotResponse(BaseModel):
     """Complete consolidated traffic telemetry snapshot for REST queries and WebSocket broadcasts."""
     simulation_id: Optional[str] = Field(default=None, description="Identifier of current simulation run")
@@ -153,4 +207,5 @@ class TrafficSnapshotResponse(BaseModel):
     ai: Optional[AIDecisionInfo] = Field(default=None, description="Present when DQN controller is running")
     emergency: Optional[EmergencyLiveInfo] = Field(default=None, description="Live emergency vehicle intelligence state")
     prediction: Optional[PredictionLiveInfo] = Field(default=None, description="Live 30-second congestion forecast and empirical confidence")
+    coordination: Optional[MultiIntersectionCoordinationInfo] = Field(default=None, description="Real-time multi-intersection network coordination state")
     decision: Optional[Dict[str, Any]] = Field(default=None, description="Complete 7-stage Agentic AI decision record")

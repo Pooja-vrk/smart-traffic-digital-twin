@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from simulation.controllers.base_controller import BaseController
 
 from simulation.config import ExperimentConfig
+from simulation.coordination import MultiIntersectionCoordinator, MultiIntersectionState
 from simulation.metrics import AggregateMetrics, SimulationMetrics
 from simulation.state import TrafficState
 from simulation.traci_controller import TraCIController
@@ -47,6 +48,8 @@ class TrafficSimulationEnvironment:
             tls_id=tls_id,
         )
 
+        self.coordinator = MultiIntersectionCoordinator(primary_intersection_id=tls_id)
+
         self.agentic_engine: Optional[Any] = None
         if enable_agentic_engine and self.controller is not None:
             from simulation.agentic.engine import AgenticTrafficEngine
@@ -67,15 +70,21 @@ class TrafficSimulationEnvironment:
     def start(self, use_gui: Optional[bool] = None) -> TrafficState:
         """Start simulation session and return initial state."""
         self.traci_controller.start_simulation(use_gui=use_gui)
+        self.coordinator.reset()
         if self.agentic_engine is not None:
             self.agentic_engine.reset()
         elif self.controller:
             self.controller.reset()
-        return self.traci_controller.get_current_state()
+        init_state = self.traci_controller.get_current_state()
+        self.coordinator.step(init_state, step_length=self.traci_controller.step_length)
+        return init_state
 
     def step(self) -> TrafficState:
         """Advance simulation by one second, applying active controller logic if present."""
         current_state = self.traci_controller.get_current_state()
+
+        # Update multi-intersection coordination with current primary state
+        self.coordinator.step(current_state, step_length=self.traci_controller.step_length)
 
         if self.agentic_engine is not None:
             self.agentic_engine.step(current_state, self.traci_controller)
@@ -84,6 +93,10 @@ class TrafficSimulationEnvironment:
 
         next_state = self.traci_controller.step_simulation()
         return next_state
+
+    def get_coordination_state(self) -> MultiIntersectionState:
+        """Query multi-intersection progression and neighbor coordination state."""
+        return self.coordinator.get_state()
 
     def get_latest_decision(self) -> Optional[Any]:
         """Query most recent agentic decision record if engine is active."""

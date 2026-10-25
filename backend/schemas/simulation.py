@@ -85,6 +85,23 @@ class EmergencyVehicleResponse(BaseModel):
     message: str = Field(..., description="Human-readable confirmation message")
 
 
+class CoordinationModeRequest(BaseModel):
+    """Request payload to change multi-intersection coordination mode."""
+    mode: Literal["ARTERY_EW", "ARTERY_NS", "BALANCED_ADAPTIVE", "ISOLATED"] = Field(
+        default="ARTERY_EW",
+        description="Coordination mode: 'ARTERY_EW', 'ARTERY_NS', 'BALANCED_ADAPTIVE', or 'ISOLATED'",
+    )
+
+
+class CoordinationModeResponse(BaseModel):
+    """Response returned upon changing multi-intersection coordination mode."""
+    status: str = Field(default="success")
+    simulation_id: str = Field(default="")
+    mode: str = Field(...)
+    message: str = Field(...)
+    coordination: Dict[str, Any] = Field(default_factory=dict)
+
+
 class SimulationStartResponse(BaseModel):
     """Response returned upon successful simulation launch."""
     status: str = Field(default="started", description="Operation status ('started')")
