@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Car, ListTree, Clock, Gauge, Leaf } from 'lucide-react';
+import { Car, ListTree, Clock, Gauge, Leaf, Play } from 'lucide-react';
 import { useTrafficWebSocket } from '../hooks/useTrafficWebSocket';
 import { getHealth } from '../services/api';
 import { calculateCongestionScore, formatDecimal } from '../utils/formatters';
@@ -14,14 +14,18 @@ import ControllerComparison from '../components/dashboard/ControllerComparison';
 import RecentEvents         from '../components/dashboard/RecentEvents';
 import LiveTrafficFeed      from '../components/dashboard/LiveTrafficFeed';
 import AgentStatus          from '../components/dashboard/AgentStatus';
+import AIDecisionHistory    from '../components/dashboard/AIDecisionHistory';
+import OfflineReplayModal   from '../components/dashboard/OfflineReplayModal';
 
 const MAX_HISTORY = 120;
 
 const Dashboard = ({ onNavigate }) => {
-  const { isConnected, simulationStatus, trafficData, startStopPoll } = useTrafficWebSocket();
+  const { isConnected, simulationStatus, trafficData, aiDecisions, startStopPoll } = useTrafficWebSocket();
 
   const [health,  setHealth]  = useState(null);
   const [history, setHistory] = useState([]);
+  const [replaySimulationId, setReplaySimulationId] = useState(null);
+
 
   /* Health polling */
   useEffect(() => {
@@ -149,12 +153,35 @@ const Dashboard = ({ onNavigate }) => {
 
         {/* ── CENTER column ───────────────────────────────── */}
         <div className="dashboard-center">
+          {simulationStatus?.simulation_id && !simulationStatus?.running && (
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 6 }}>
+              <button
+                onClick={() => setReplaySimulationId(simulationStatus.simulation_id)}
+                className="btn btn-secondary"
+                style={{
+                  fontSize: 11,
+                  padding: '3px 10px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  borderColor: 'var(--cyan)',
+                  color: 'var(--cyan)',
+                }}
+              >
+                <Play size={11} /> Replay Session Offline
+              </button>
+            </div>
+          )}
           <DigitalTwinIntersection
             trafficData={trafficData}
             simulationStatus={simulationStatus}
           />
+          <AIDecisionHistory
+            decisions={aiDecisions}
+            isRunning={simulationStatus?.running}
+            simulationId={simulationStatus?.simulation_id}
+          />
           <LiveTrafficFeed trafficData={trafficData} />
-          <RecentEvents />
         </div>
 
         {/* ── RIGHT column ────────────────────────────────── */}
@@ -165,10 +192,20 @@ const Dashboard = ({ onNavigate }) => {
           />
           <ControllerComparison
             onNavigateAnalytics={() => onNavigate && onNavigate('analytics')}
+            refreshTrigger={simulationStatus?.status}
           />
+          <RecentEvents />
         </div>
 
       </div>
+
+      {/* Offline Replay Modal */}
+      {replaySimulationId && (
+        <OfflineReplayModal
+          simulationId={replaySimulationId}
+          onClose={() => setReplaySimulationId(null)}
+        />
+      )}
     </div>
   );
 };

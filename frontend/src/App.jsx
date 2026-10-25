@@ -3,6 +3,7 @@ import Sidebar from './components/layout/Sidebar';
 import TopHeader from './components/layout/TopHeader';
 import Dashboard from './pages/Dashboard';
 import Simulation from './pages/Simulation';
+import ScenarioLab from './pages/ScenarioLab';
 import Analytics from './pages/Analytics';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
@@ -32,6 +33,7 @@ function App() {
     switch (currentPage) {
       case 'dashboard':  return <Dashboard  onNavigate={setCurrentPage} />;
       case 'simulation': return <Simulation />;
+      case 'scenarios':  return <ScenarioLab onNavigate={setCurrentPage} />;
       case 'analytics':  return <Analytics  onNavigate={setCurrentPage} />;
       case 'reports':    return <Reports />;
       case 'settings':   return <Settings />;

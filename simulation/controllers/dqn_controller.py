@@ -49,6 +49,9 @@ class DQNController(BaseController):
 
         self._active_green = SignalSafetyManager.NS_GREEN
         self._last_selected_action = 0
+        self._last_q_values: List[float] = []
+        self._last_features: List[float] = []
+        self._last_reward: Optional[float] = None
 
     def _load_model(self) -> None:
         """Load trained model weights from disk."""
@@ -65,6 +68,9 @@ class DQNController(BaseController):
         super().reset()
         self._active_green = SignalSafetyManager.NS_GREEN
         self._last_selected_action = 0
+        self._last_q_values = []
+        self._last_features = []
+        self._last_reward = None
 
     def decide_target_phase(self, state: TrafficState) -> int:
         """Query trained DQN policy to determine target green phase.
@@ -80,12 +86,19 @@ class DQNController(BaseController):
             max_queue=self.config.max_queue_norm,
             max_time=self.config.max_green_seconds,
         )
+        self._last_features = norm_features
 
-        # 2. Greedy action selection (evaluation mode, no exploration)
+        # 2. Extract Q-values from policy network
+        try:
+            self._last_q_values = self.agent.get_q_values(norm_features)
+        except Exception:
+            self._last_q_values = []
+
+        # 3. Greedy action selection (evaluation mode, no exploration)
         action = self.agent.select_action(norm_features, evaluate=True)
         self._last_selected_action = action
 
-        # 3. Map action to target green corridor
+        # 4. Map action to target green corridor
         current_safe_phase = self.safety_manager.current_phase
 
         if action == DQNAgent.ACTION_KEEP:
@@ -98,6 +111,9 @@ class DQNController(BaseController):
         elif action == DQNAgent.ACTION_REQUEST_EW:
             self._active_green = SignalSafetyManager.EW_GREEN
 
+        # Step reward estimate (penalty for total queue & waiting)
+        self._last_reward = round(float(-1.0 * state.total_queue - 0.05 * state.total_waiting_time), 3)
+
         return self._active_green
 
     def get_stats(self) -> Dict[str, Any]:
@@ -105,5 +121,8 @@ class DQNController(BaseController):
         stats["config"] = self.config.to_dict()
         stats["last_selected_action"] = self._last_selected_action
         stats["last_action_name"] = DQNAgent.ACTION_NAMES.get(self._last_selected_action, "UNKNOWN")
+        stats["q_values"] = self._last_q_values
+        stats["normalized_state"] = self._last_features
+        stats["reward"] = self._last_reward
         stats["model_path"] = str(self.model_path)
         return stats

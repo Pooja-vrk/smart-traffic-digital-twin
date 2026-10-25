@@ -2,6 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard,
   PlayCircle,
+  FlaskConical,
   BarChart3,
   FileText,
   Settings,
@@ -10,8 +11,9 @@ import {
 } from 'lucide-react';
 
 const NAV_ITEMS = [
-  { id: 'dashboard',  label: 'Dashboard',   icon: LayoutDashboard },
+  { id: 'dashboard',  label: 'Dashboard',    icon: LayoutDashboard },
   { id: 'simulation', label: 'Simulation',   icon: PlayCircle      },
+  { id: 'scenarios',  label: 'Scenario Lab', icon: FlaskConical    },
   { id: 'analytics',  label: 'Analytics',    icon: BarChart3       },
   { id: 'reports',    label: 'Reports',      icon: FileText        },
   { id: 'settings',   label: 'Settings',     icon: Settings        },

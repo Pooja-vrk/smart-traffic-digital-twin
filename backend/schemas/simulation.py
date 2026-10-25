@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -79,6 +79,10 @@ class SimulationResultResponse(BaseModel):
     steps: int = Field(..., description="Total completed simulation steps")
     status: str = Field(default="completed", description="Final run status")
     metrics: Dict[str, Any] = Field(..., description="Comprehensive aggregate performance metrics dictionary")
+    prediction_metrics: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Time-aligned live congestion forecast evaluation metrics (MAE, RMSE, baseline comparison)",
+    )
 
 
 class SimulationRunDetail(BaseModel):
@@ -111,3 +115,58 @@ class SignalDecisionResponse(BaseModel):
     current_phase: int = Field(..., description="Signal phase active at decision time")
     elapsed_green: float = Field(..., description="Elapsed duration in active green")
 
+
+class AgenticDecisionResponse(BaseModel):
+    """Complete explainable Agentic AI decision record representing the full 7-stage loop."""
+    model_config = ConfigDict(protected_namespaces=())
+
+    decision_id: str = Field(default="", description="Unique UUID for decision instance")
+    simulation_id: Optional[str] = Field(default=None, description="Simulation identifier")
+    simulation_time: float = Field(default=0.0, description="Simulation elapsed time in seconds")
+    step: int = Field(default=0, description="Simulation step integer")
+    controller: str = Field(default="Unknown", description="Active controller identifier")
+    observation: Dict[str, Any] = Field(default_factory=dict, description="Stage 1: Verified snapshot observations")
+    detected_conditions: Dict[str, Any] = Field(default_factory=dict, description="Stage 2: Analyzed directional pressures and congestion")
+    requested_action: str = Field(default="KEEP", description="Stage 3: Proposed action name")
+    requested_phase: int = Field(default=0, description="Stage 3: Proposed green phase index (0 or 2)")
+    validated_action: str = Field(default="APPROVED", description="Stage 4: Legally safe action approved or overridden")
+    validated_phase: int = Field(default=0, description="Stage 4: Validated phase index enforced by safety manager")
+    is_safety_override: bool = Field(default=False, description="Whether safety manager overrode or restricted the proposed action")
+    safety_status: str = Field(default="SAFE", description="Safety manager state classification")
+    safety_reason: str = Field(default="", description="Safety manager verification rationale")
+    decision_reason: str = Field(default="", description="Controller policy rationale and supporting state")
+    execution_status: str = Field(default="EXECUTED", description="Stage 5: TraCI actuation status")
+    q_values: Optional[List[float]] = Field(default=None, description="Raw policy network expected cumulative returns (never labeled as probabilities)")
+    reward: Optional[float] = Field(default=None, description="Step reinforcement learning reward")
+    prediction: Optional[Dict[str, Any]] = Field(default=None, description="Time-aligned live congestion forecast when available")
+    emergency: Optional[Dict[str, Any]] = Field(default=None, description="Emergency green corridor tracking when active")
+    post_action_metrics: Optional[Dict[str, Any]] = Field(default=None, description="Stage 6: Outcome deltas measured from prior step")
+
+    # Backward compatibility fields
+    action_id: Optional[int] = Field(default=None)
+    action: Optional[str] = Field(default=None)
+    approved: Optional[bool] = Field(default=None)
+    current_phase: Optional[int] = Field(default=None)
+    elapsed_green: Optional[float] = Field(default=None)
+    reason: Optional[str] = Field(default=None)
+
+
+class ReplayFrameResponse(BaseModel):
+    """Synchronized offline telemetry and decision frame."""
+    step: int = Field(..., description="Simulation step index")
+    simulation_time: float = Field(..., description="Simulation timestamp in seconds")
+    snapshot: Dict[str, Any] = Field(..., description="Instantaneous digital twin traffic snapshot")
+    decision: Optional[Dict[str, Any]] = Field(default=None, description="Agentic decision made at this step")
+
+
+class ReplayBundleResponse(BaseModel):
+    """Complete recorded experiment telemetry bundle for offline playback without SUMO."""
+    simulation_id: str = Field(..., description="Simulation identifier")
+    controller: str = Field(..., description="Active controller identifier")
+    total_frames: int = Field(..., description="Total count of chronological frames")
+    duration_seconds: float = Field(..., description="Total duration of recorded experiment in seconds")
+    frames: List[ReplayFrameResponse] = Field(default_factory=list, description="Chronological playback frames")
+
+
+AgenticDecisionResponse.model_rebuild()
+ReplayBundleResponse.model_rebuild()

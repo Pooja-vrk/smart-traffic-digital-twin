@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     WEBSOCKET_HEARTBEAT_INTERVAL: float = 15.0  # seconds
 
     # MongoDB Persistence settings
-    MONGODB_URI: str = Field(default="mongodb://localhost:27017", validation_alias="MONGODB_URI")
+    MONGODB_URI: str = Field(default="mongodb://127.0.0.1:27017", validation_alias="MONGODB_URI")
     DATABASE_NAME: str = Field(default="smart_traffic_digital_twin", validation_alias="DATABASE_NAME")
     MONGODB_CONNECT_TIMEOUT_MS: int = 2000
 

@@ -130,3 +130,36 @@ def test_context_manager_cleanup():
         controller.step_simulation()
 
     assert not controller.is_running()
+
+
+def test_live_vehicle_and_signal_telemetry():
+    """Verify TraCIController extracts live individual vehicle spatial states and raw signal state."""
+    controller = TraCIController(use_gui=False, step_length=1.0, seed=42)
+
+    try:
+        controller.start_simulation()
+        # Run enough steps for vehicles to enter intersection
+        for _ in range(25):
+            state = controller.step_simulation()
+
+        assert isinstance(state, TrafficState)
+        assert isinstance(state.signal_raw_state, str)
+        assert len(state.signal_raw_state) > 0, "TraCI should return non-empty signal state string"
+
+        assert isinstance(state.vehicles, list)
+        if len(state.vehicles) > 0:
+            v = state.vehicles[0]
+            assert hasattr(v, "id")
+            assert hasattr(v, "x")
+            assert hasattr(v, "y")
+            assert hasattr(v, "angle")
+            assert hasattr(v, "speed")
+            assert hasattr(v, "lane_id")
+            assert hasattr(v, "edge_id")
+            assert hasattr(v, "waiting_time")
+            assert hasattr(v, "vehicle_type")
+            assert 0.0 <= v.x <= 600.0
+            assert 0.0 <= v.y <= 600.0
+            assert 0.0 <= v.angle <= 360.0
+    finally:
+        controller.close_simulation()

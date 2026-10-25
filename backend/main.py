@@ -15,6 +15,7 @@ from backend.api import api_router
 from backend.config.settings import settings
 from backend.database.connection import db_manager
 from backend.database.repositories.intersection_repository import IntersectionRepository
+from backend.services.scenario_manager import scenario_manager
 from backend.services.simulation_manager import sim_manager
 from backend.websocket.manager import ws_manager
 
@@ -31,7 +32,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Starting Smart Traffic Digital Twin Backend v%s...", settings.VERSION)
     loop = asyncio.get_running_loop()
     sim_manager.set_event_loop(loop)
-    logger.info("SimulationManager registered with event loop.")
+    scenario_manager.set_event_loop(loop)
+    logger.info("SimulationManager and ScenarioManager registered with event loop.")
 
     # Initialize MongoDB persistence
     mongo_connected = db_manager.connect()
@@ -42,10 +44,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.warning("MongoDB unavailable. Digital Twin running with in-memory telemetry only.")
 
+    # Eagerly load congestion prediction model
+    try:
+        from prediction.predictor import predictor
+        loaded = predictor.load_model()
+        if loaded:
+            logger.info("Congestion prediction model loaded successfully at startup.")
+        else:
+            logger.warning("Congestion prediction model not available. Predictive intelligence will run in fallback mode.")
+    except Exception as exc:
+        logger.warning("Could not initialize prediction model at startup: %s", exc)
+
     yield
 
     logger.info("Shutting down Smart Traffic Digital Twin Backend...")
     sim_manager.shutdown()
+    scenario_manager.stop_scenario()
     db_manager.disconnect()
     logger.info("Shutdown complete. All simulation, background, and database connections cleaned up.")
 

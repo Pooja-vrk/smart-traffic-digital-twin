@@ -17,6 +17,10 @@ class WebSocketMessage(BaseModel):
         "simulation_stopped",
         "simulation_error",
         "status_update",
+        "scenario_stage_update",
+        "scenario_status_update",
+        "scenario_completed",
+        "scenario_stopped",
         "pong",
     ] = Field(..., description="Message event type classification")
     timestamp: str = Field(

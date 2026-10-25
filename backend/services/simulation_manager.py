@@ -23,6 +23,7 @@ from backend.schemas.traffic import TrafficSnapshotResponse
 from backend.services.persistence_service import PersistenceService
 from backend.services.telemetry_service import TelemetryService
 from backend.websocket.manager import ws_manager
+from prediction.predictor import predictor
 from simulation.config import AdaptiveConfig, FixedTimeConfig
 
 from simulation.controllers.adaptive_controller import AdaptiveController
@@ -55,7 +56,7 @@ class SimulationManager:
     """Coordinates execution of SUMO simulations in non-blocking background threads."""
 
     def __init__(self) -> None:
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -159,6 +160,12 @@ class SimulationManager:
                     f"Simulation {self._simulation_id} is currently running in status '{self._status}'."
                 )
 
+            from backend.services.scenario_manager import scenario_manager
+            if scenario_manager.is_running():
+                raise SimulationAlreadyRunningError(
+                    "A Scenario Lab experiment is currently running. Stop the active scenario before starting a new simulation."
+                )
+
             # Validate controller & instantiate before launching thread
             controller = self._create_controller(request.controller)
 
@@ -175,6 +182,9 @@ class SimulationManager:
             self._latest_snapshot = None
             self._status = "starting"
             self._stop_event.clear()
+
+            # Reset predictive live evaluation tracker for new run
+            predictor.reset_live_tracker(sim_id)
 
             # Launch background worker
             self._thread = threading.Thread(
@@ -274,6 +284,7 @@ class SimulationManager:
                 seed=seed,
                 use_gui=gui,
                 controller=controller,
+                simulation_id=sim_id,
             )
 
             initial_state = env.start()
@@ -290,6 +301,7 @@ class SimulationManager:
                     controller=controller,
                     simulation_id=sim_id,
                     peak_queue=self._peak_queue,
+                    agentic_decision=env.get_latest_decision(),
                 )
 
             # Persist initial traffic snapshot
@@ -304,6 +316,7 @@ class SimulationManager:
 
                 next_state = env.step()
                 step_metrics = env.get_metrics()
+                decision = env.get_latest_decision()
 
                 with self._lock:
                     self._current_step = step_num
@@ -315,6 +328,7 @@ class SimulationManager:
                         controller=controller,
                         simulation_id=sim_id,
                         peak_queue=self._peak_queue,
+                        agentic_decision=decision,
                     )
                     self._latest_snapshot = snapshot
 
@@ -322,7 +336,23 @@ class SimulationManager:
                 PersistenceService.save_traffic_snapshot(snapshot.model_dump())
 
                 # Persist controller signal decisions
-                if snapshot.ai is not None:
+                if decision is not None:
+                    if snapshot.prediction and snapshot.prediction.model_available:
+                        decision.prediction = snapshot.prediction.model_dump()
+                    PersistenceService.save_agentic_decision(decision.to_dict())
+                    PersistenceService.save_signal_decision(
+                        simulation_id=sim_id,
+                        simulation_time=next_state.simulation_time,
+                        controller=controller_name,
+                        action_id=snapshot.ai.action_id if snapshot.ai else decision.validated_phase,
+                        action_name=decision.requested_action,
+                        requested_phase=decision.requested_phase,
+                        approved=(decision.validated_action == "APPROVED"),
+                        reason=decision.decision_reason,
+                        current_phase=next_state.current_phase,
+                        elapsed_green=next_state.time_since_phase_change,
+                    )
+                elif snapshot.ai is not None:
                     # DQN Decision logging
                     PersistenceService.save_signal_decision(
                         simulation_id=sim_id,
@@ -388,6 +418,9 @@ class SimulationManager:
                 metrics=final_metrics_dict,
             )
 
+            # Retrieve verified live prediction metrics
+            pred_metrics = predictor.get_live_tracker_metrics()
+
             # Record in-memory final results
             with self._lock:
                 self._status = final_status
@@ -399,6 +432,7 @@ class SimulationManager:
                         steps=self._current_step,
                         status="completed",
                         metrics=final_metrics_dict,
+                        prediction_metrics=pred_metrics,
                     )
 
             logger.info("Simulation %s finished with final_status='%s'", sim_id, final_status)
@@ -414,6 +448,7 @@ class SimulationManager:
                     "controller": controller_name,
                     "seed": seed,
                     "final_step": self._current_step,
+                    "prediction_metrics": pred_metrics,
                 }
                 if aggregate_metrics is not None:
                     event_data["metrics"] = final_metrics_dict

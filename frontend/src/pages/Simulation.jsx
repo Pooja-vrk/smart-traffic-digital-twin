@@ -19,6 +19,7 @@ import AgentStatus        from '../components/dashboard/AgentStatus';
 import TrafficMetricsChart from '../components/dashboard/TrafficMetricsChart';
 import LiveTrafficFeed    from '../components/dashboard/LiveTrafficFeed';
 import RecentEvents       from '../components/dashboard/RecentEvents';
+import AIDecisionHistory    from '../components/dashboard/AIDecisionHistory';
 
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -71,7 +72,7 @@ const MiniChart = ({ data, dataKey, color, label, unit }) => (
 
 /* ── Main page ─────────────────────────────────────────────── */
 const Simulation = () => {
-  const { isConnected, simulationStatus, trafficData, startStopPoll } = useTrafficWebSocket();
+  const { isConnected, simulationStatus, trafficData, aiDecisions, startStopPoll } = useTrafficWebSocket();
 
   const [health,  setHealth]  = useState(null);
   const [result,  setResult]  = useState(null);
@@ -287,19 +288,11 @@ const Simulation = () => {
             </Card>
           )}
 
-          {/* Event log */}
-          {logs.length > 0 && (
-            <Card title="AI Decision Log" titleIcon={<BarChart2 size={14} />} noPadding>
-              <div className="sim-log">
-                {logs.map(l => (
-                  <div key={l.id} className="log-line">
-                    <span className="log-time">{l.ts}</span>
-                    <span className={`log-msg ${l.type === 'ai' ? 'ai-msg' : 'info-msg'}`}>{l.msg}</span>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          )}
+          {/* AI Decision History */}
+          <AIDecisionHistory
+            decisions={aiDecisions}
+            isRunning={simulationStatus?.running}
+          />
 
         </div>
       </div>

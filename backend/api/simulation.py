@@ -7,6 +7,8 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.schemas.simulation import (
+    AgenticDecisionResponse,
+    ReplayBundleResponse,
     SignalDecisionResponse,
     SimulationResultResponse,
     SimulationRunDetail,
@@ -152,14 +154,60 @@ async def get_simulation_snapshots(
 
 @router.get(
     "/{simulation_id}/decisions",
-    response_model=List[SignalDecisionResponse],
-    summary="Get Simulation Signal Decisions",
+    summary="Get Simulation Decisions",
 )
 async def get_simulation_decisions(
     simulation_id: str,
+    controller: Optional[str] = Query(default=None, description="Filter by controller"),
+    safety_override_only: bool = Query(default=False, description="Filter to safety overrides only"),
+    emergency_only: bool = Query(default=False, description="Filter to emergency priority events only"),
+    skip: int = Query(default=0, ge=0, description="Offset for pagination"),
     limit: int = Query(default=300, ge=1, le=1000, description="Max decision logs to retrieve"),
-) -> List[SignalDecisionResponse]:
-    """Retrieve chronological controller signal switching and AI decisions for a simulation session."""
-    decisions = PersistenceService.get_simulation_decisions(simulation_id, limit=limit)
-    return [SignalDecisionResponse(**d) for d in decisions]
+) -> List[dict]:
+    """Retrieve chronological controller signal switching and explainable AI decisions."""
+    decisions = PersistenceService.get_simulation_decisions(
+        simulation_id=simulation_id,
+        controller=controller,
+        safety_override_only=safety_override_only,
+        emergency_only=emergency_only,
+        skip=skip,
+        limit=limit,
+    )
+    return decisions
 
+
+@router.get(
+    "/{simulation_id}/decisions/{decision_id}",
+    summary="Get Single Decision Inspection",
+)
+async def get_single_decision_detail(
+    simulation_id: str,
+    decision_id: str,
+) -> dict:
+    """Retrieve full 7-stage explainability details for a single decision record."""
+    decision = PersistenceService.get_single_decision(simulation_id, decision_id)
+    if not decision:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Decision '{decision_id}' for simulation '{simulation_id}' not found.",
+        )
+    return decision
+
+
+@router.get(
+    "/{simulation_id}/replay",
+    response_model=ReplayBundleResponse,
+    summary="Get Simulation Offline Replay Telemetry Frames",
+)
+async def get_simulation_replay(
+    simulation_id: str,
+    limit: int = Query(default=1000, ge=1, le=5000, description="Max replay frames to return"),
+) -> ReplayBundleResponse:
+    """Retrieve time-synchronized offline telemetry frames and decision records without running SUMO."""
+    bundle = PersistenceService.get_replay_frames(simulation_id, limit=limit)
+    if not bundle or not bundle.get("frames"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No telemetry replay frames recorded for simulation '{simulation_id}'.",
+        )
+    return ReplayBundleResponse(**bundle)

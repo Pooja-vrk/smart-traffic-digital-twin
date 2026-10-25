@@ -16,6 +16,7 @@ class PredictionStatusResponse(BaseModel):
     feature_count: int = Field(default=0, description="Number of features used by the model")
     last_training_time: Optional[str] = Field(default=None, description="Timestamp of last model training")
     feature_version: Optional[str] = Field(default=None, description="Feature engineering version")
+    feature_importances: Optional[Dict[str, float]] = Field(default=None, description="Top feature importance rankings")
 
 
 class PredictionTrainRequest(BaseModel):
@@ -48,6 +49,15 @@ class PredictionCurrentResponse(BaseModel):
     model_available: bool = Field(default=False, description="Whether model is available")
     baseline_score: float = Field(default=0.0, description="Baseline prediction (current congestion)")
     current_congestion_score: float = Field(default=0.0, description="Current congestion score")
+    trend: Optional[str] = Field(default="STABLE", description="Predicted trend: 'INCREASING', 'DECREASING', 'STABLE'")
+    confidence_lower: Optional[float] = Field(default=None, description="10th percentile empirical confidence (80% CI)")
+    confidence_upper: Optional[float] = Field(default=None, description="90th percentile empirical confidence (80% CI)")
+    std_dev: Optional[float] = Field(default=None, description="Standard deviation across ensemble trees")
+    evaluated_samples: int = Field(default=0, description="Verified time-aligned samples evaluated")
+    live_mae: Optional[float] = Field(default=None, description="Cumulative verified live MAE")
+    live_rmse: Optional[float] = Field(default=None, description="Cumulative verified live RMSE")
+    baseline_mae: Optional[float] = Field(default=None, description="Cumulative baseline MAE")
+    mae_improvement_pct: Optional[float] = Field(default=None, description="Live MAE improvement percentage over baseline")
 
 
 class PredictionPredictRequest(BaseModel):
@@ -67,6 +77,11 @@ class PredictionPredictResponse(BaseModel):
     model_available: bool = Field(default=False, description="Whether model is available")
     baseline_score: float = Field(default=0.0, description="Baseline prediction")
     current_congestion_score: float = Field(default=0.0, description="Current congestion score")
+    trend: Optional[str] = Field(default="STABLE", description="Predicted trend")
+    confidence_lower: Optional[float] = Field(default=None, description="10th percentile empirical confidence")
+    confidence_upper: Optional[float] = Field(default=None, description="90th percentile empirical confidence")
+    std_dev: Optional[float] = Field(default=None, description="Standard deviation across trees")
+
 
 
 class PredictionHistoryResponse(BaseModel):

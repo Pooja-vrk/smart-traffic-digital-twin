@@ -63,6 +63,17 @@ export const getSimulationDecisions = async (simulationId, params = {}) => {
   return response.data;
 };
 
+export const getSingleDecision = async (simulationId, decisionId) => {
+  const response = await api.get(`/api/simulation/${simulationId}/decisions/${decisionId}`);
+  return response.data;
+};
+
+export const getSimulationReplay = async (simulationId, params = {}) => {
+  const response = await api.get(`/api/simulation/${simulationId}/replay`, { params });
+  return response.data;
+};
+
+
 // Traffic
 export const getCurrentTraffic = async () => {
   const response = await api.get('/api/traffic/current');
@@ -118,6 +129,43 @@ export const predictCongestion = async (data) => {
 
 export const getPredictionHistory = async (params = {}) => {
   const response = await api.get('/api/prediction/history', { params });
+  return response.data;
+};
+
+// Scenario Lab
+export const getScenarioPresets = async () => {
+  const response = await api.get('/api/scenarios/presets');
+  return response.data;
+};
+
+export const runScenario = async (data) => {
+  const response = await api.post('/api/scenarios/run', data);
+  return response.data;
+};
+
+export const stopScenario = async () => {
+  const response = await api.post('/api/scenarios/stop');
+  return response.data;
+};
+
+export const getScenarioStatus = async (scenarioId) => {
+  const endpoint = scenarioId ? `/api/scenarios/status/${scenarioId}` : '/api/scenarios/status';
+  const response = await api.get(endpoint);
+  return response.data;
+};
+
+export const getLatestScenarioResult = async () => {
+  const response = await api.get('/api/scenarios/result/latest');
+  return response.data;
+};
+
+export const getScenarioResult = async (scenarioId) => {
+  const response = await api.get(`/api/scenarios/${scenarioId}/result`);
+  return response.data;
+};
+
+export const getScenarioHistory = async (params = {}) => {
+  const response = await api.get('/api/scenarios/history', { params });
   return response.data;
 };
 

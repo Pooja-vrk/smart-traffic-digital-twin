@@ -166,9 +166,12 @@ class BaselinePredictor:
         Returns:
             Predicted congestion scores (n_samples,).
         """
-        # The baseline simply predicts that future congestion equals current congestion
-        # We assume the last feature is current_congestion_score
-        predictions = X[:, -1]  # Last column
+        # In canonical 26-feature vector, index 16 is current_congestion_score.
+        # Fall back to last column for test matrices with custom columns.
+        if X.shape[1] >= 26:
+            predictions = X[:, 16]
+        else:
+            predictions = X[:, -1]
         return predictions
 
     def get_model_info(self) -> Dict:

@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import joblib
 import numpy as np
 
+from backend.schemas.traffic import PredictionLiveInfo
 from prediction.config import PredictionConfig
-from prediction.congestion import classify_congestion
+from prediction.congestion import build_congestion_score, classify_congestion
 from prediction.feature_engineering import extract_features, get_feature_names, prepare_feature_vector
+from prediction.live_evaluator import LiveForecastTracker
 from prediction.model import BaselinePredictor, CongestionPredictionModel
 
 logger = logging.getLogger(__name__)
@@ -83,6 +86,26 @@ class CongestionPredictor:
         self.baseline: BaselinePredictor = BaselinePredictor()
         self.feature_metadata: Optional[FeatureMetadata] = None
         self.is_loaded = False
+        self.live_tracker = LiveForecastTracker(
+            horizon_seconds=PredictionConfig.PREDICTION_HORIZON_SECONDS,
+            match_tolerance_seconds=1.0,
+        )
+        self._history: deque = deque(maxlen=10)
+        self._current_simulation_id: Optional[str] = None
+        self._cached_step_key: Optional[tuple] = None
+        self._cached_step_prediction: Optional[PredictionLiveInfo] = None
+
+    def reset_live_tracker(self, simulation_id: Optional[str] = None) -> None:
+        """Reset time-aligned evaluation tracker and rolling snapshot history."""
+        self._current_simulation_id = simulation_id
+        self._history.clear()
+        self._cached_step_key = None
+        self._cached_step_prediction = None
+        self.live_tracker.reset(simulation_id)
+
+    def get_live_tracker_metrics(self) -> Dict[str, Any]:
+        """Return cumulative live MAE/RMSE and time-aligned evaluation statistics."""
+        return self.live_tracker.get_metrics()
 
     def load_model(
         self,
@@ -186,13 +209,192 @@ class CongestionPredictor:
             "current_congestion_score": features.get("current_congestion_score", 0.0),
         }
 
+    def predict_live(
+        self,
+        snapshot: Dict,
+        simulation_id: Optional[str] = None,
+        step: int = 0,
+        simulation_time: float = 0.0,
+    ) -> PredictionLiveInfo:
+        """
+        Produce a non-fatal, cached real-time congestion forecast with 80% CI and live evaluation.
+
+        - Avoids redundant inference if called multiple times for the same simulation step.
+        - Isolates failures (returns safe fallback with model_available=False instead of throwing).
+        - Automatically manages temporal lag feature history.
+        - Verifies past predictions against actual observed congestion at t + 30s.
+        """
+        # Step cache check: prevent duplicate inference for identical simulation step
+        cache_key = (simulation_id, step, round(float(simulation_time), 2))
+        if self._cached_step_key == cache_key and self._cached_step_prediction is not None:
+            return self._cached_step_prediction
+
+        # Reset history and tracker if simulation ID changed
+        if simulation_id is not None and simulation_id != self._current_simulation_id:
+            self.reset_live_tracker(simulation_id)
+
+        # Lazy load model if needed
+        if not self.is_loaded or self.model is None:
+            self.load_model()
+
+        # Compute current actual congestion score for this snapshot
+        try:
+            current_score = float(build_congestion_score(snapshot))
+        except Exception:
+            current_score = 0.0
+
+        # Step 1: Time-aligned verification of past predictions targeting current simulation_time
+        if simulation_id is not None:
+            self.live_tracker.evaluate_step(
+                simulation_id=simulation_id,
+                simulation_time=simulation_time,
+                actual_score=current_score,
+            )
+
+        # Retrieve running verification metrics
+        eval_metrics = self.live_tracker.get_metrics()
+
+        # Fallback if model could not be loaded
+        if not self.is_loaded or self.model is None:
+            fallback = PredictionLiveInfo(
+                model_available=False,
+                model_name=None,
+                predicted_score=round(current_score, 2),
+                current_score=round(current_score, 2),
+                congestion_level=classify_congestion(current_score) if 0 <= current_score <= 100 else "FREE_FLOW",
+                horizon_seconds=PredictionConfig.PREDICTION_HORIZON_SECONDS,
+                trend="STABLE",
+                confidence_lower=round(current_score, 2),
+                confidence_upper=round(current_score, 2),
+                std_dev=0.0,
+                baseline_score=round(current_score, 2),
+                evaluated_samples=eval_metrics.get("evaluated_samples", 0),
+                live_mae=eval_metrics.get("live_mae"),
+                live_rmse=eval_metrics.get("live_rmse"),
+                baseline_mae=eval_metrics.get("baseline_mae"),
+                mae_improvement_pct=eval_metrics.get("mae_improvement_pct"),
+                last_verified_actual=eval_metrics.get("last_verified_actual"),
+                last_verified_predicted=eval_metrics.get("last_verified_predicted"),
+            )
+            self._cached_step_key = cache_key
+            self._cached_step_prediction = fallback
+            return fallback
+
+        try:
+            # Extract features using rolling snapshot history
+            hist_list = list(self._history)
+            features = extract_features(snapshot, hist_list if hist_list else None)
+            feature_vector = prepare_feature_vector(features)
+            X = feature_vector.reshape(1, -1)
+
+            # Predict future congestion score
+            predicted_score = float(self.model.predict(X)[0])
+            predicted_score = max(0.0, min(100.0, predicted_score))
+
+            # Empirical 80% confidence interval across the 200 random forest trees
+            conf_lower = predicted_score
+            conf_upper = predicted_score
+            std_dev = 0.0
+
+            inner_rf = getattr(self.model, "model", None)
+            if inner_rf is not None and hasattr(inner_rf, "estimators_") and len(inner_rf.estimators_) > 0:
+                tree_preds = np.array([tree.predict(X)[0] for tree in inner_rf.estimators_])
+                conf_lower = float(np.percentile(tree_preds, 10))
+                conf_upper = float(np.percentile(tree_preds, 90))
+                std_dev = float(np.std(tree_preds))
+
+                conf_lower = max(0.0, min(100.0, conf_lower))
+                conf_upper = max(0.0, min(100.0, conf_upper))
+                std_dev = round(std_dev, 2)
+
+            # Congestion level classification
+            congestion_level = classify_congestion(predicted_score)
+
+            # Trend relative to current score
+            diff = predicted_score - current_score
+            if diff > 2.0:
+                trend = "INCREASING"
+            elif diff < -2.0:
+                trend = "DECREASING"
+            else:
+                trend = "STABLE"
+
+            baseline_score = current_score
+
+            # Record this forecast for future evaluation at (simulation_time + 30.0s)
+            if simulation_id is not None:
+                self.live_tracker.record_forecast(
+                    simulation_id=simulation_id,
+                    step=step,
+                    simulation_time=simulation_time,
+                    predicted_score=predicted_score,
+                    baseline_score=baseline_score,
+                    horizon_seconds=self.feature_metadata.prediction_horizon if self.feature_metadata else PredictionConfig.PREDICTION_HORIZON_SECONDS,
+                )
+
+            # Update rolling snapshot history
+            self._history.append(dict(snapshot))
+
+            result = PredictionLiveInfo(
+                model_available=True,
+                model_name=self.feature_metadata.model_name if self.feature_metadata else "RandomForestRegressor",
+                predicted_score=round(predicted_score, 2),
+                current_score=round(current_score, 2),
+                congestion_level=congestion_level,
+                horizon_seconds=self.feature_metadata.prediction_horizon if self.feature_metadata else PredictionConfig.PREDICTION_HORIZON_SECONDS,
+                trend=trend,
+                confidence_lower=round(conf_lower, 2),
+                confidence_upper=round(conf_upper, 2),
+                std_dev=std_dev,
+                baseline_score=round(baseline_score, 2),
+                evaluated_samples=eval_metrics.get("evaluated_samples", 0),
+                live_mae=eval_metrics.get("live_mae"),
+                live_rmse=eval_metrics.get("live_rmse"),
+                baseline_mae=eval_metrics.get("baseline_mae"),
+                mae_improvement_pct=eval_metrics.get("mae_improvement_pct"),
+                last_verified_actual=eval_metrics.get("last_verified_actual"),
+                last_verified_predicted=eval_metrics.get("last_verified_predicted"),
+            )
+
+            self._cached_step_key = cache_key
+            self._cached_step_prediction = result
+            return result
+
+        except Exception as exc:
+            logger.warning("predict_live failed: %s; returning fallback", exc)
+            fallback = PredictionLiveInfo(
+                model_available=False,
+                model_name=self.feature_metadata.model_name if self.feature_metadata else None,
+                predicted_score=round(current_score, 2),
+                current_score=round(current_score, 2),
+                congestion_level="UNKNOWN",
+                trend="STABLE",
+                baseline_score=round(current_score, 2),
+                evaluated_samples=eval_metrics.get("evaluated_samples", 0),
+                live_mae=eval_metrics.get("live_mae"),
+                live_rmse=eval_metrics.get("live_rmse"),
+            )
+            self._cached_step_key = cache_key
+            self._cached_step_prediction = fallback
+            return fallback
+
     def get_status(self) -> Dict:
         """
-        Get predictor status.
+        Get predictor status including top feature importances.
 
         Returns:
             Dictionary with status information.
         """
+        importances = None
+        if self.is_loaded and self.model is not None:
+            try:
+                importances = self.model.get_feature_importance()
+                if importances:
+                    # Sort by importance descending, take top 8
+                    importances = dict(sorted(importances.items(), key=lambda kv: kv[1], reverse=True)[:8])
+            except Exception:
+                importances = None
+
         return {
             "model_available": self.is_loaded,
             "model_name": self.feature_metadata.model_name if self.feature_metadata else None,
@@ -200,6 +402,7 @@ class CongestionPredictor:
             "feature_count": len(self.feature_metadata.feature_names) if self.feature_metadata else 0,
             "last_training_time": self.feature_metadata.training_timestamp if self.feature_metadata else None,
             "feature_version": self.feature_metadata.feature_version if self.feature_metadata else None,
+            "feature_importances": importances,
         }
 
 

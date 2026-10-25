@@ -107,6 +107,27 @@ async def get_current_prediction() -> PredictionCurrentResponse:
     # Convert to dict
     snapshot_dict = latest_snapshot.model_dump()
 
+    if latest_snapshot.prediction is not None and latest_snapshot.prediction.model_available:
+        p = latest_snapshot.prediction
+        return PredictionCurrentResponse(
+            predicted_congestion_score=p.predicted_score,
+            congestion_level=p.congestion_level,
+            prediction_horizon=p.horizon_seconds,
+            model_name=p.model_name or "RandomForestRegressor",
+            model_available=p.model_available,
+            baseline_score=p.baseline_score if p.baseline_score is not None else p.current_score,
+            current_congestion_score=p.current_score,
+            trend=p.trend,
+            confidence_lower=p.confidence_lower,
+            confidence_upper=p.confidence_upper,
+            std_dev=p.std_dev,
+            evaluated_samples=p.evaluated_samples,
+            live_mae=p.live_mae,
+            live_rmse=p.live_rmse,
+            baseline_mae=p.baseline_mae,
+            mae_improvement_pct=p.mae_improvement_pct,
+        )
+
     # Make prediction
     try:
         prediction = predictor.predict(snapshot_dict, historical_snapshots=None)

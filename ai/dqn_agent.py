@@ -120,6 +120,18 @@ class DQNAgent:
         self.policy_net.train()
         return action
 
+    def get_q_values(self, state: Union[List[float], np.ndarray]) -> List[float]:
+        """Compute Q-values for all discrete actions from policy network."""
+        self.policy_net.eval()
+        with torch.no_grad():
+            state_tensor = torch.tensor(
+                state,
+                dtype=torch.float32,
+                device=self.device,
+            ).unsqueeze(0)
+            q_values = self.policy_net(state_tensor)
+            return [round(float(q), 4) for q in q_values.squeeze(0).cpu().numpy()]
+
     def store_transition(
         self,
         state: Union[List[float], np.ndarray],

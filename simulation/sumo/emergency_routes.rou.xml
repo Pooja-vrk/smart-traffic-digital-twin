@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Standalone Reproducible Emergency Scenario Routes File -->
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <!-- Vehicle Type Definitions -->
+    <vType id="standard_car"
+           accel="2.6"
+           decel="4.5"
+           sigma="0.5"
+           length="5.0"
+           minGap="2.5"
+           maxSpeed="13.89"
+           color="0,0.6,0.9"/>
+
+    <vType id="heavy_vehicle"
+           accel="1.5"
+           decel="3.5"
+           sigma="0.5"
+           length="8.5"
+           minGap="3.0"
+           maxSpeed="11.11"
+           color="0.9,0.5,0.1"/>
+
+    <vType id="emergency_vehicle"
+           accel="3.5"
+           decel="5.0"
+           sigma="0.2"
+           length="6.5"
+           minGap="2.0"
+           maxSpeed="22.22"
+           color="1.0,0.1,0.1"
+           vClass="emergency"
+           guiShape="emergency"/>
+
+    <vType id="ambulance"
+           accel="3.5"
+           decel="5.0"
+           sigma="0.2"
+           length="6.5"
+           minGap="2.0"
+           maxSpeed="22.22"
+           color="1.0,0.1,0.1"
+           vClass="emergency"
+           guiShape="emergency"/>
+
+    <vType id="fire_engine"
+           accel="2.8"
+           decel="4.5"
+           sigma="0.2"
+           length="8.5"
+           minGap="2.5"
+           maxSpeed="20.0"
+           color="0.9,0.2,0.1"
+           vClass="emergency"
+           guiShape="firebrigade"/>
+
+    <!-- Route Definitions -->
+    <!-- Straight Movements -->
+    <route id="r_NS" edges="N2C C2S"/>
+    <route id="r_SN" edges="S2C C2N"/>
+    <route id="r_EW" edges="E2C C2W"/>
+    <route id="r_WE" edges="W2C C2E"/>
+
+    <!-- Turning Movements -->
+    <route id="r_NW" edges="N2C C2W"/>
+    <route id="r_NE" edges="N2C C2E"/>
+    <route id="r_SE" edges="S2C C2E"/>
+    <route id="r_SW" edges="S2C C2W"/>
+    <route id="r_EN" edges="E2C C2N"/>
+    <route id="r_ES" edges="E2C C2S"/>
+    <route id="r_WS" edges="W2C C2S"/>
+    <route id="r_WN" edges="W2C C2N"/>
+
+    <!-- Traffic Demand Flows (Simulation time: 0 to 3600 seconds) -->
+    <!-- North-South Corridor (Moderate-Heavy Traffic) -->
+    <flow id="flow_NS" type="standard_car" route="r_NS" begin="0" end="3600" vehsPerHour="750" departLane="best" departSpeed="max"/>
+    <flow id="flow_SN" type="standard_car" route="r_SN" begin="0" end="3600" vehsPerHour="750" departLane="best" departSpeed="max"/>
+
+    <!-- East-West Corridor (Moderate Traffic) -->
+    <flow id="flow_EW" type="standard_car" route="r_EW" begin="0" end="3600" vehsPerHour="450" departLane="best" departSpeed="max"/>
+    <flow id="flow_WE" type="standard_car" route="r_WE" begin="0" end="3600" vehsPerHour="450" departLane="best" departSpeed="max"/>
+
+    <!-- Turning Flows -->
+    <flow id="flow_NW" type="standard_car" route="r_NW" begin="0" end="3600" vehsPerHour="120" departLane="best" departSpeed="max"/>
+    <flow id="flow_SE" type="standard_car" route="r_SE" begin="0" end="3600" vehsPerHour="120" departLane="best" departSpeed="max"/>
+    <flow id="flow_EN" type="standard_car" route="r_EN" begin="0" end="3600" vehsPerHour="80" departLane="best" departSpeed="max"/>
+    <flow id="flow_WS" type="standard_car" route="r_WS" begin="0" end="3600" vehsPerHour="80" departLane="best" departSpeed="max"/>
+
+    <!-- Heavy Vehicles -->
+    <flow id="flow_truck_NS" type="heavy_vehicle" route="r_NS" begin="10" end="3600" vehsPerHour="60" departLane="best" departSpeed="max"/>
+    <flow id="flow_truck_EW" type="heavy_vehicle" route="r_EW" begin="10" end="3600" vehsPerHour="40" departLane="best" departSpeed="max"/>
+
+    <!-- Reproducible Emergency Vehicle (Ambulance) on East Approach -->
+    <vehicle id="EV_01" type="ambulance" route="r_EW" depart="15.0" departLane="best" departSpeed="max"/>
+</routes>

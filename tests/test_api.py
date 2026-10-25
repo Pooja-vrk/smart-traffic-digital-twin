@@ -26,7 +26,7 @@ def clean_simulation_state():
         time.sleep(0.5)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def client():
     """FastAPI TestClient fixture with lifespan context."""
     with TestClient(app) as test_client:
@@ -378,6 +378,10 @@ def test_real_sumo_simulation_dqn_integration(client: TestClient):
     assert "action" in traffic_data["ai"]
     assert "action_id" in traffic_data["ai"]
     assert "approved" in traffic_data["ai"]
+    assert "q_values" in traffic_data["ai"]
+    assert "normalized_state" in traffic_data["ai"]
+    assert "vehicles_data" in traffic_data
+    assert isinstance(traffic_data["vehicles_data"], list)
 
     # Verify final aggregate result
     result_resp = client.get("/api/simulation/result")
@@ -386,4 +390,35 @@ def test_real_sumo_simulation_dqn_integration(client: TestClient):
     assert result_data["status"] == "completed"
     assert result_data["controller"] == "dqn"
     assert "metrics" in result_data
+
+
+def test_websocket_traffic_update_vehicles_data(client: TestClient):
+    """Verify WebSocket client receives traffic_update events with live vehicles_data."""
+    with client.websocket_connect("/ws/traffic") as websocket:
+        # Start a short simulation
+        start_resp = client.post(
+            "/api/simulation/start",
+            json={"controller": "fixed", "steps": 6, "seed": 42},
+        )
+        assert start_resp.status_code == 200
+
+        received_traffic_update = False
+        start_t = time.time()
+        while time.time() - start_t < 10.0:
+            try:
+                data = websocket.receive_json()
+                if data.get("type") == "traffic_update":
+                    payload = data.get("data", {})
+                    assert "vehicles_data" in payload
+                    assert "queues" in payload
+                    assert "signal" in payload
+                    assert "raw_state" in payload["signal"]
+                    received_traffic_update = True
+                    break
+            except Exception:
+                break
+
+        # Stop simulation
+        client.post("/api/simulation/stop")
+        assert received_traffic_update, "Expected at least one traffic_update on WebSocket"
 

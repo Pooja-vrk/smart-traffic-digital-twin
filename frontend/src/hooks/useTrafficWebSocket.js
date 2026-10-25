@@ -11,6 +11,7 @@ export const useTrafficWebSocket = () => {
   const [isConnected,      setIsConnected]      = useState(false);
   const [simulationStatus, setSimulationStatus] = useState(null);
   const [trafficData,      setTrafficData]      = useState(null);
+  const [aiDecisions,      setAiDecisions]      = useState([]);
   const [lastUpdate,       setLastUpdate]       = useState(null);
 
   // Track whether we are in a "stopping" state so we can poll for confirmation
@@ -34,6 +35,7 @@ export const useTrafficWebSocket = () => {
         if (s && !s.running) {
           // Simulation has actually stopped — update state and stop polling
           setSimulationStatus(s);
+          setTrafficData(prev => (prev ? { ...prev, isLive: false } : null));
           cancelStopPoll();
         }
       } catch {
@@ -57,28 +59,47 @@ export const useTrafficWebSocket = () => {
     const handleStatusUpdate = (data) => {
       if (data && data.data) {
         setSimulationStatus(data.data);
-        // If the status update confirms not running, cancel any stop poll
         if (!data.data.running) {
           cancelStopPoll();
+          setTrafficData(prev => (prev ? { ...prev, isLive: false } : null));
         }
       }
     };
 
     const handleTrafficUpdate = (data) => {
       if (data && data.data) {
-        setTrafficData(data.data);
+        const payload = { ...data.data, isLive: true };
+        setTrafficData(payload);
         setLastUpdate(new Date());
+
+        // Record real AI decision history if DQN decision present
+        if (payload.ai && payload.ai.action) {
+          setAiDecisions(prev => {
+            const entry = {
+              id: `${payload.simulation_id || 'sim'}-${payload.simulation_time}-${payload.step}`,
+              simulation_time: payload.simulation_time,
+              action: payload.ai.action,
+              action_id: payload.ai.action_id,
+              requested_phase: payload.ai.requested_phase,
+              approved: payload.ai.approved,
+              reason: payload.ai.reason,
+              q_values: payload.ai.q_values || [],
+              reward: payload.ai.reward,
+              decision_time: payload.ai.decision_time ?? payload.simulation_time,
+              timestamp: new Date().toLocaleTimeString(undefined, { hour12: false }),
+            };
+            // Keep up to 30 latest decisions
+            return [entry, ...prev.filter(p => p.id !== entry.id)].slice(0, 30);
+          });
+        }
       }
     };
 
-    // ── FIX: handle terminal events by immediately updating simulationStatus
-    // rather than only logging. The backend now also sends a status_update after
-    // these events, but handling them here provides instant UI feedback even if
-    // the status_update is slightly delayed or the WS reconnects.
-
     const handleSimulationStarted = (data) => {
       console.log('Simulation started:', data);
-      // Optimistically mark as running so buttons update instantly
+      // Clean previous run's live telemetry and AI history
+      setTrafficData(null);
+      setAiDecisions([]);
       setSimulationStatus(prev => ({
         ...(prev || {}),
         running: true,
@@ -96,6 +117,7 @@ export const useTrafficWebSocket = () => {
         status: 'completed',
         ...(data?.data || {}),
       }));
+      setTrafficData(prev => (prev ? { ...prev, isLive: false } : null));
     };
 
     const handleSimulationStopped = (data) => {
@@ -107,6 +129,7 @@ export const useTrafficWebSocket = () => {
         status: 'stopped',
         ...(data?.data || {}),
       }));
+      setTrafficData(prev => (prev ? { ...prev, isLive: false } : null));
     };
 
     const handleSimulationError = (data) => {
@@ -118,6 +141,7 @@ export const useTrafficWebSocket = () => {
         status: 'error',
         ...(data?.data || {}),
       }));
+      setTrafficData(prev => (prev ? { ...prev, isLive: false } : null));
     };
 
     wsService.on('connected',             handleConnected);
@@ -160,10 +184,11 @@ export const useTrafficWebSocket = () => {
     isConnected,
     simulationStatus,
     trafficData,
+    aiDecisions,
     lastUpdate,
     onEvent,
     sendPing,
-    startStopPoll,   // used by SimulationControl to activate polling fallback
-    cancelStopPoll,  // used to cancel it
+    startStopPoll,
+    cancelStopPoll,
   };
 };

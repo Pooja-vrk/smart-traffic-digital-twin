@@ -24,9 +24,9 @@ class FixedTimeController(BaseController):
         self.config = config or FixedTimeConfig()
 
         safety_mgr = SignalSafetyManager(
-            min_green_seconds=self.config.ns_green_seconds,
+            min_green_seconds=min(10.0, self.config.ns_green_seconds),
             yellow_seconds=self.config.ns_yellow_seconds,
-            max_green_seconds=max(self.config.ns_green_seconds, self.config.ew_green_seconds),
+            max_green_seconds=max(60.0, self.config.ns_green_seconds, self.config.ew_green_seconds),
         )
 
         super().__init__(name="Fixed-Time", tls_id=tls_id, safety_manager=safety_mgr)

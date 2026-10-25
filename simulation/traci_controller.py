@@ -7,6 +7,7 @@ phase control, state extraction, and safe cleanup for traffic simulations.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import shutil
 import sys
@@ -16,8 +17,9 @@ from typing import Any, Dict, List, Optional
 import sumolib
 import traci
 
+from simulation.emergency import EmergencyCorridorTracker
 from simulation.metrics import MetricsCalculator, SimulationMetrics
-from simulation.state import ApproachState, TrafficState
+from simulation.state import ApproachState, EmergencyVehicleState, TrafficState, VehicleState
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,7 @@ class TraCIController:
         self._time_since_phase_change = 0.0
 
         self._metrics_calculator = MetricsCalculator()
+        self._emergency_tracker = EmergencyCorridorTracker()
         self._current_metrics: Optional[SimulationMetrics] = None
         self._ensure_sumo_home()
 
@@ -168,6 +171,7 @@ class TraCIController:
             self._current_step = 0
             self._sim_time = float(traci.simulation.getTime())
             self._metrics_calculator.reset()
+            self._emergency_tracker.reset()
             self._last_phase = self.get_tls_phase()
             self._time_since_phase_change = 0.0
             logger.info("SUMO simulation started successfully via TraCI (%s).", "GUI" if self.use_gui else "CLI")
@@ -250,11 +254,41 @@ class TraCIController:
 
         active_veh_ids = traci.vehicle.getIDList()
         total_active_vehicles = len(active_veh_ids)
+        emergency_state = self._emergency_tracker.update_from_traci(
+            traci_module=traci,
+            sim_time=self._sim_time,
+            step_length=self.step_length,
+        )
+        live_vehicles: List[VehicleState] = []
 
         for veh_id in active_veh_ids:
             try:
-                total_speed += traci.vehicle.getSpeed(veh_id)
-                total_wait += traci.vehicle.getWaitingTime(veh_id)
+                spd = float(traci.vehicle.getSpeed(veh_id))
+                wait = float(traci.vehicle.getWaitingTime(veh_id))
+                total_speed += spd
+                total_wait += wait
+
+                pos = traci.vehicle.getPosition(veh_id)
+                ang = float(traci.vehicle.getAngle(veh_id))
+                lane = str(traci.vehicle.getLaneID(veh_id))
+                edge = str(traci.vehicle.getRoadID(veh_id))
+                vtype = str(traci.vehicle.getTypeID(veh_id))
+                length = float(traci.vehicle.getLength(veh_id))
+                width = float(traci.vehicle.getWidth(veh_id))
+
+                live_vehicles.append(VehicleState(
+                    id=str(veh_id),
+                    x=round(float(pos[0]), 2),
+                    y=round(float(pos[1]), 2),
+                    angle=round(ang, 1),
+                    speed=round(spd, 2),
+                    lane_id=lane,
+                    edge_id=edge,
+                    waiting_time=round(wait, 1),
+                    vehicle_type=vtype,
+                    length=round(length, 1),
+                    width=round(width, 1),
+                ))
             except Exception:
                 continue
 
@@ -285,6 +319,12 @@ class TraCIController:
         phase_idx = self.get_tls_phase()
         phase_name = self.PHASE_MAP.get(phase_idx, f"PHASE_{phase_idx}")
 
+        raw_state = ""
+        try:
+            raw_state = str(traci.trafficlight.getRedYellowGreenState(self.tls_id))
+        except Exception:
+            raw_state = ""
+
         return TrafficState(
             simulation_time=self._sim_time,
             step=self._current_step,
@@ -299,6 +339,9 @@ class TraCIController:
             current_phase=phase_idx,
             current_phase_name=phase_name,
             time_since_phase_change=round(self._time_since_phase_change, 1),
+            signal_raw_state=raw_state,
+            vehicles=live_vehicles,
+            emergency=emergency_state,
         )
 
     def get_metrics(self) -> SimulationMetrics:
@@ -325,6 +368,18 @@ class TraCIController:
     def is_running(self) -> bool:
         """Check if TraCI simulation is actively running."""
         return self._is_running
+
+    def notify_emergency_priority_requested(self, sim_time: float) -> None:
+        """Inform tracker that emergency priority has been requested."""
+        self._emergency_tracker.on_priority_requested(sim_time)
+
+    def notify_emergency_priority_active(self, sim_time: float) -> None:
+        """Inform tracker that emergency priority green corridor is actively holding."""
+        self._emergency_tracker.on_priority_activated(sim_time, step_length=self.step_length)
+
+    def get_emergency_metrics(self) -> Optional[Dict[str, Any]]:
+        """Return empirical emergency green corridor performance metrics."""
+        return self._emergency_tracker.get_latest_metrics()
 
     def close_simulation(self) -> None:
         """Safely terminate the simulation and close TraCI socket connection."""

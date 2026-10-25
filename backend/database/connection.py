@@ -118,6 +118,24 @@ class DatabaseManager:
                 ("timestamp", pymongo.DESCENDING),
             ])
 
+            # 6. agentic_decisions: compound simulation_id + simulation_time, simulation_id + step, decision_id
+            self.sync_db.agentic_decisions.create_index([
+                ("simulation_id", pymongo.ASCENDING),
+                ("simulation_time", pymongo.ASCENDING),
+            ])
+            self.sync_db.agentic_decisions.create_index([
+                ("simulation_id", pymongo.ASCENDING),
+                ("step", pymongo.ASCENDING),
+            ])
+            self.sync_db.agentic_decisions.create_index([
+                ("simulation_id", pymongo.ASCENDING),
+                ("decision_id", pymongo.ASCENDING),
+            ])
+            self.sync_db.agentic_decisions.create_index([
+                ("simulation_id", pymongo.ASCENDING),
+                ("is_safety_override", pymongo.ASCENDING),
+            ])
+
             logger.info("MongoDB indexes verified and created successfully.")
         except Exception as exc:
             logger.warning("Failed to create MongoDB indexes: %s", exc)
