@@ -17,6 +17,8 @@ class WebSocketMessage(BaseModel):
         "simulation_stopped",
         "simulation_error",
         "status_update",
+        "emergency_scheduled",
+        "emergency_update",
         "scenario_stage_update",
         "scenario_status_update",
         "scenario_completed",

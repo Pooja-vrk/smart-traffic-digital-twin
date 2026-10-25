@@ -381,6 +381,83 @@ class TraCIController:
         """Return empirical emergency green corridor performance metrics."""
         return self._emergency_tracker.get_latest_metrics()
 
+    APPROACH_ROUTES = {
+        "north": "r_NS",
+        "south": "r_SN",
+        "east": "r_EW",
+        "west": "r_WE",
+    }
+
+    def inject_emergency_vehicle(
+        self,
+        vehicle_id: str = "EV_01",
+        vehicle_type: str = "ambulance",
+        approach: str = "east",
+    ) -> bool:
+        """Dynamically inject an emergency vehicle onto the specified approach corridor.
+
+        Args:
+            vehicle_id: Unique TraCI vehicle ID (defaults to 'EV_01').
+            vehicle_type: Vehicle type ID ('ambulance', 'fire_engine', 'police', 'emergency_vehicle').
+            approach: Directional inflow approach corridor ('north', 'south', 'east', 'west').
+
+        Returns:
+            bool: True if vehicle was successfully injected.
+
+        Raises:
+            RuntimeError: If TraCI simulation is not running.
+            ValueError: If approach is invalid.
+        """
+        if not self._is_running:
+            raise RuntimeError("Cannot inject vehicle: TraCI simulation is not running.")
+
+        app_lower = approach.lower().strip()
+        route_id = self.APPROACH_ROUTES.get(app_lower)
+        if not route_id:
+            raise ValueError(
+                f"Unknown approach corridor: '{approach}'. Must be one of {list(self.APPROACH_ROUTES.keys())}."
+            )
+
+        vtype = vehicle_type.strip()
+        try:
+            loaded_types = traci.vehicletype.getIDList()
+        except Exception:
+            loaded_types = []
+
+        if vtype not in loaded_types:
+            try:
+                base_type = "emergency_vehicle" if "emergency_vehicle" in loaded_types else (loaded_types[0] if loaded_types else "DEFAULT_VEHTYPE")
+                traci.vehicletype.copy(base_type, vtype)
+                traci.vehicletype.setVehicleClass(vtype, "emergency")
+                traci.vehicletype.setMaxSpeed(vtype, 22.22)
+                traci.vehicletype.setAccel(vtype, 3.5)
+                traci.vehicletype.setDecel(vtype, 5.0)
+                if vtype == "fire_engine":
+                    traci.vehicletype.setColor(vtype, (230, 50, 20, 255))
+                    traci.vehicletype.setShapeClass(vtype, "firebrigade")
+                    traci.vehicletype.setLength(vtype, 8.5)
+                elif vtype == "police":
+                    traci.vehicletype.setColor(vtype, (50, 100, 255, 255))
+                    traci.vehicletype.setShapeClass(vtype, "police")
+                    traci.vehicletype.setLength(vtype, 5.5)
+                else:
+                    traci.vehicletype.setColor(vtype, (255, 25, 25, 255))
+                    traci.vehicletype.setShapeClass(vtype, "emergency")
+                    traci.vehicletype.setLength(vtype, 6.5)
+            except Exception as vtype_err:
+                logger.warning("Could not dynamically configure vType '%s' in TraCI: %s", vtype, vtype_err)
+
+        traci.vehicle.add(
+            vehID=vehicle_id,
+            routeID=route_id,
+            typeID=vtype,
+            depart="now",
+            departLane="best",
+            departSpeed="max",
+        )
+        logger.info("Injected emergency vehicle %s (%s) onto %s approach (route %s)", vehicle_id, vtype, app_lower, route_id)
+        return True
+
     def close_simulation(self) -> None:
         """Safely terminate the simulation and close TraCI socket connection."""
         if not self._is_running:

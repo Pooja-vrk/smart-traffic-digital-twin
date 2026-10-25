@@ -52,6 +52,17 @@
            vClass="emergency"
            guiShape="firebrigade"/>
 
+    <vType id="police"
+           accel="3.5"
+           decel="5.0"
+           sigma="0.2"
+           length="5.5"
+           minGap="2.0"
+           maxSpeed="22.22"
+           color="0.2,0.4,1.0"
+           vClass="emergency"
+           guiShape="police"/>
+
     <!-- Route Definitions -->
     <!-- Straight Movements -->
     <route id="r_NS" edges="N2C C2S"/>

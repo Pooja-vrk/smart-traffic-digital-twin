@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional, Tuple
 from backend.config.settings import settings
 from backend.schemas.simulation import (
     ControllerInfo,
+    EmergencyVehicleRequest,
+    EmergencyVehicleResponse,
     SimulationResultResponse,
     SimulationStartRequest,
     SimulationStartResponse,
@@ -39,6 +41,16 @@ logger = logging.getLogger(__name__)
 
 class SimulationAlreadyRunningError(Exception):
     """Raised when attempting to start a simulation while another is active."""
+    pass
+
+
+class SimulationNotRunningError(Exception):
+    """Raised when attempting an emergency action when no simulation is active."""
+    pass
+
+
+class EmergencyAlreadyActiveError(Exception):
+    """Raised when an emergency vehicle is already scheduled or active."""
     pass
 
 
@@ -75,6 +87,10 @@ class SimulationManager:
         self._latest_snapshot: Optional[TrafficSnapshotResponse] = None
         self._last_result: Optional[SimulationResultResponse] = None
         self._peak_queue: int = 0
+
+        # Emergency vehicle scheduling
+        self._scheduled_emergency: Optional[Dict[str, Any]] = None
+        self._emergency_counter: int = 0
 
         # Event loop reference for WebSocket dispatching from worker thread
         self._main_loop: Optional[asyncio.AbstractEventLoop] = None
@@ -183,6 +199,20 @@ class SimulationManager:
             self._status = "starting"
             self._stop_event.clear()
 
+            # Configure initial emergency vehicle if requested
+            if getattr(request, "emergency_vehicle", False):
+                self._emergency_counter = 1
+                self._scheduled_emergency = {
+                    "vehicle_id": "EV_01",
+                    "vehicle_type": getattr(request, "emergency_vehicle_type", "ambulance") or "ambulance",
+                    "approach": getattr(request, "emergency_approach", "east") or "east",
+                    "spawn_step": getattr(request, "emergency_step", 5) if getattr(request, "emergency_step", None) is not None else 5,
+                    "injected": False,
+                }
+            else:
+                self._scheduled_emergency = None
+                self._emergency_counter = 0
+
             # Reset predictive live evaluation tracker for new run
             predictor.reset_live_tracker(sim_id)
 
@@ -263,6 +293,105 @@ class SimulationManager:
         with self._lock:
             return self._last_result
 
+    def trigger_emergency_vehicle(self, request: EmergencyVehicleRequest) -> EmergencyVehicleResponse:
+        """Dynamically schedule or inject an emergency vehicle into the active simulation."""
+        with self._lock:
+            if self._status not in {"starting", "running"}:
+                raise SimulationNotRunningError(
+                    f"Cannot activate emergency vehicle: simulation is not running (current status: '{self._status}')."
+                )
+
+            # Prevent duplicate emergency requests if one is currently pending injection
+            if self._scheduled_emergency is not None and not self._scheduled_emergency.get("injected", False):
+                raise EmergencyAlreadyActiveError(
+                    f"An emergency vehicle ({self._scheduled_emergency.get('vehicle_id')}) is already scheduled for step {self._scheduled_emergency.get('spawn_step')}."
+                )
+
+            # Prevent duplicate if an emergency vehicle is currently active in the simulation corridor
+            if (
+                self._latest_snapshot is not None
+                and self._latest_snapshot.emergency is not None
+                and (
+                    self._latest_snapshot.emergency.active
+                    or (
+                        self._latest_snapshot.emergency.lifecycle_state
+                        and self._latest_snapshot.emergency.lifecycle_state not in {"IDLE", "None", "", None}
+                    )
+                )
+            ):
+                raise EmergencyAlreadyActiveError(
+                    f"An emergency vehicle is already actively preempting corridor (state: {self._latest_snapshot.emergency.lifecycle_state})."
+                )
+
+            if request.spawn_step is not None and request.spawn_step > self._total_steps:
+                raise ValueError(
+                    f"Requested spawn step {request.spawn_step} exceeds total simulation steps ({self._total_steps})."
+                )
+
+            # Target step calculation: if None or <= current step, target current step (injected on next loop tick)
+            target_step = (
+                max(self._current_step, request.spawn_step)
+                if request.spawn_step is not None
+                else self._current_step
+            )
+
+            self._emergency_counter += 1
+            vehicle_id = f"EV_{self._emergency_counter:02d}"
+
+            self._scheduled_emergency = {
+                "vehicle_id": vehicle_id,
+                "vehicle_type": request.vehicle_type,
+                "approach": request.approach.lower(),
+                "spawn_step": target_step,
+                "injected": False,
+            }
+
+            status_str = "scheduled" if target_step > self._current_step else "activating"
+            sim_id = self._simulation_id or ""
+            msg = f"Emergency {request.vehicle_type} ({vehicle_id}) {status_str} for approach '{request.approach}' at step {target_step}."
+            logger.info("Simulation %s: %s", sim_id, msg)
+
+            # Broadcast WebSocket notification
+            if self._main_loop:
+                ws_msg = TelemetryService.create_websocket_message(
+                    msg_type="emergency_scheduled",
+                    simulation_id=sim_id,
+                    data={
+                        "vehicle_id": vehicle_id,
+                        "vehicle_type": request.vehicle_type,
+                        "approach": request.approach.lower(),
+                        "spawn_step": target_step,
+                        "status": status_str,
+                    },
+                )
+                ws_manager.broadcast_from_thread(ws_msg, self._main_loop)
+
+            return EmergencyVehicleResponse(
+                status=status_str,
+                simulation_id=sim_id,
+                vehicle_id=vehicle_id,
+                vehicle_type=request.vehicle_type,
+                approach=request.approach.lower(),
+                spawn_step=target_step,
+                message=msg,
+            )
+
+    def get_emergency_status(self) -> Dict[str, Any]:
+        """Return current status of scheduled and active emergency vehicle state."""
+        with self._lock:
+            sched = dict(self._scheduled_emergency) if self._scheduled_emergency else None
+            emer = (
+                self._latest_snapshot.emergency.model_dump()
+                if (self._latest_snapshot and self._latest_snapshot.emergency)
+                else None
+            )
+            return {
+                "simulation_id": self._simulation_id,
+                "running": self.is_running(),
+                "scheduled": sched,
+                "emergency": emer,
+            }
+
     def _run_simulation_worker(
         self,
         sim_id: str,
@@ -314,6 +443,34 @@ class SimulationManager:
                     final_status = "stopped"
                     break
 
+                # Check dynamic or scheduled emergency injection
+                inject_data: Optional[Dict[str, Any]] = None
+                with self._lock:
+                    if (
+                        self._scheduled_emergency is not None
+                        and not self._scheduled_emergency.get("injected", False)
+                        and step_num >= self._scheduled_emergency.get("spawn_step", 0)
+                    ):
+                        self._scheduled_emergency["injected"] = True
+                        inject_data = dict(self._scheduled_emergency)
+
+                if inject_data and env and env.traci_controller:
+                    try:
+                        logger.info(
+                            "Injecting dynamic emergency vehicle %s (%s) on approach '%s' at step %d",
+                            inject_data["vehicle_id"],
+                            inject_data["vehicle_type"],
+                            inject_data["approach"],
+                            step_num,
+                        )
+                        env.traci_controller.inject_emergency_vehicle(
+                            vehicle_id=inject_data["vehicle_id"],
+                            vehicle_type=inject_data["vehicle_type"],
+                            approach=inject_data["approach"],
+                        )
+                    except Exception as inject_err:
+                        logger.error("Failed to inject emergency vehicle in TraCI: %s", inject_err, exc_info=True)
+
                 next_state = env.step()
                 step_metrics = env.get_metrics()
                 decision = env.get_latest_decision()
@@ -331,6 +488,16 @@ class SimulationManager:
                         agentic_decision=decision,
                     )
                     self._latest_snapshot = snapshot
+
+                    # If emergency vehicle was injected and has finished corridor passage and restored to IDLE, reset slot
+                    if (
+                        self._scheduled_emergency is not None
+                        and self._scheduled_emergency.get("injected", False)
+                        and snapshot.emergency is not None
+                        and not snapshot.emergency.active
+                        and snapshot.emergency.lifecycle_state in {"IDLE", "None", "", None}
+                    ):
+                        self._scheduled_emergency = None
 
                 # Persist periodic snapshot to database
                 PersistenceService.save_traffic_snapshot(snapshot.model_dump())
@@ -424,6 +591,7 @@ class SimulationManager:
             # Record in-memory final results
             with self._lock:
                 self._status = final_status
+                self._scheduled_emergency = None
                 if final_status == "completed" and aggregate_metrics is not None:
                     self._last_result = SimulationResultResponse(
                         simulation_id=sim_id,

@@ -90,7 +90,9 @@ const TrafficLightHead = ({ x, y, state, angle = 0, label = '' }) => {
 /* ── Live Vehicle SVG Element ────────────────────────────────── */
 const VehicleNode = React.memo(({ veh, onSelect, isSelected }) => {
   const isStopped = (veh.speed ?? 0) < 0.2 || (veh.waiting_time ?? 0) > 0.5;
-  const isEmergency = veh.vehicle_type?.includes('emergency') || veh.vehicle_type?.includes('ambulance') || veh.vehicle_type?.includes('fire') || veh.id?.startsWith('EV') || veh.id === 'EV_01';
+  const isEmergency = veh.vehicle_type?.includes('emergency') || veh.vehicle_type?.includes('ambulance') || veh.vehicle_type?.includes('fire') || veh.vehicle_type?.includes('police') || veh.id?.startsWith('EV') || veh.id === 'EV_01';
+  const isPolice = !veh.vehicle_type?.includes('ambulance') && !veh.vehicle_type?.includes('fire') && (veh.vehicle_type?.includes('police') || veh.id?.toLowerCase().includes('police'));
+  const isFire = veh.vehicle_type?.includes('fire');
   const isHeavy = !isEmergency && (veh.vehicle_type?.includes('heavy') || (veh.length ?? 5) > 6.0);
 
   // In SUMO network: X is East-West, Y is South-North (0..600).
@@ -103,8 +105,9 @@ const VehicleNode = React.memo(({ veh, onSelect, isSelected }) => {
   const wid = Math.max(veh.width ?? 2.0, isEmergency ? 2.4 : 2.0);
 
   // Styling based on state and type
+  const emergencyColor = isPolice ? '#3b82f6' : (isFire ? '#ea580c' : '#ef4444');
   const bodyColor = isEmergency
-    ? '#ef4444' // Emergency Red
+    ? emergencyColor // Blue for police, orange-red for fire, red for ambulance
     : isHeavy
       ? '#f59e0b' // Amber/Orange for trucks
       : isStopped
@@ -399,6 +402,12 @@ const DigitalTwinIntersection = ({ trafficData, simulationStatus }) => {
   const signal = trafficData?.signal || {};
   const speed = trafficData?.speed || {};
   const ai = trafficData?.ai || null;
+  const emergency = trafficData?.emergency || null;
+  const isEmergencyCorridorActive = !!(
+    emergency?.active ||
+    (emergency?.lifecycle_state && !['IDLE', 'None', '', null].includes(emergency.lifecycle_state))
+  );
+  const emergencyApproach = emergency?.approach?.toLowerCase();
 
   const rawVehicles = trafficData?.vehicles_data || [];
   const smoothVehicles = useSmoothVehicles(rawVehicles);
@@ -623,6 +632,25 @@ const DigitalTwinIntersection = ({ trafficData, simulationStatus }) => {
           <rect x="289.6" y="289.6" width="20.8" height="20.8" fill="#0f1924" />
           <rect x="289.6" y="289.6" width="20.8" height="20.8" fill="none" stroke="rgba(122,165,210,0.2)" strokeWidth="0.8" strokeDasharray="3,3" />
 
+          {/* ── Emergency Priority Green Corridor Highlight ──── */}
+          {isEmergencyCorridorActive && emergencyApproach && (
+            <g>
+              {emergencyApproach === 'north' && (
+                <rect x="289.6" y="0" width="10.4" height="289.6" fill="rgba(34, 197, 94, 0.22)" stroke="#22c55e" strokeWidth="1.2" strokeDasharray="6,4" />
+              )}
+              {emergencyApproach === 'south' && (
+                <rect x="300" y="310.4" width="10.4" height="289.6" fill="rgba(34, 197, 94, 0.22)" stroke="#22c55e" strokeWidth="1.2" strokeDasharray="6,4" />
+              )}
+              {emergencyApproach === 'east' && (
+                <rect x="310.4" y="289.6" width="289.6" height="10.4" fill="rgba(34, 197, 94, 0.22)" stroke="#22c55e" strokeWidth="1.2" strokeDasharray="6,4" />
+              )}
+              {emergencyApproach === 'west' && (
+                <rect x="0" y="300" width="289.6" height="10.4" fill="rgba(34, 197, 94, 0.22)" stroke="#22c55e" strokeWidth="1.2" strokeDasharray="6,4" />
+              )}
+              <rect x="289.6" y="289.6" width="20.8" height="20.8" fill="rgba(34, 197, 94, 0.2)" stroke="#22c55e" strokeWidth="1.2" />
+            </g>
+          )}
+
           {/* ── Road Markings ──────────────────────────────── */}
           {/* Double Yellow Dividing Lines */}
           {/* North arm divider */}
@@ -712,7 +740,7 @@ const DigitalTwinIntersection = ({ trafficData, simulationStatus }) => {
         </svg>
 
         {/* ── Live Emergency Vehicle Priority HUD Banner ────── */}
-        {trafficData?.emergency?.active && (
+        {isEmergencyCorridorActive && emergency && (
           <div
             style={{
               position: 'absolute',
@@ -721,7 +749,7 @@ const DigitalTwinIntersection = ({ trafficData, simulationStatus }) => {
               display: 'flex',
               alignItems: 'center',
               gap: 10,
-              background: 'rgba(239, 68, 68, 0.22)',
+              background: 'rgba(15, 23, 42, 0.92)',
               border: '1px solid #ef4444',
               borderRadius: 'var(--radius-sm)',
               padding: '8px 12px',
@@ -733,13 +761,16 @@ const DigitalTwinIntersection = ({ trafficData, simulationStatus }) => {
             <div style={{ fontSize: 18 }}>🚨</div>
             <div>
               <div style={{ fontSize: 10.5, fontWeight: 800, color: '#fca5a5', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-                EMERGENCY PRIORITY {trafficData.emergency.priority_active ? 'ACTIVE' : 'REQUESTED'}
+                EMERGENCY CORRIDOR: {emergency.lifecycle_state || (emergency.priority_active ? 'PRIORITY_ACTIVE' : 'DETECTED')}
               </div>
-              <div style={{ fontSize: 11, color: '#ffffff', display: 'flex', gap: 10, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>
-                <span>ID: <strong>{trafficData.emergency.vehicle_id}</strong></span>
-                <span>Approach: <strong style={{ textTransform: 'uppercase', color: '#fef08a' }}>{trafficData.emergency.approach}</strong></span>
-                <span>Distance: <strong>{trafficData.emergency.distance != null ? `${Math.round(trafficData.emergency.distance)}m` : '--'}</strong></span>
-                <span>Safety: <strong style={{ color: trafficData.emergency.priority_active ? '#86efac' : '#fef08a' }}>{trafficData.emergency.safety_status}</strong></span>
+              <div style={{ fontSize: 11, color: '#ffffff', display: 'flex', gap: 10, marginTop: 2, fontVariantNumeric: 'tabular-nums', flexWrap: 'wrap' }}>
+                <span>ID: <strong>{emergency.vehicle_id}</strong></span>
+                <span>Approach: <strong style={{ textTransform: 'uppercase', color: '#fef08a' }}>{emergency.approach}</strong></span>
+                <span>Distance: <strong>{emergency.distance_to_stopline != null ? `${Math.round(emergency.distance_to_stopline)}m` : (emergency.distance != null ? `${Math.round(emergency.distance)}m` : 'CLEARED')}</strong></span>
+                {emergency.eta_seconds != null && (
+                  <span>ETA: <strong>{emergency.eta_seconds.toFixed(1)}s</strong></span>
+                )}
+                <span>Safety: <strong style={{ color: emergency.priority_active ? '#86efac' : '#fef08a' }}>{emergency.reason || emergency.safety_status || (emergency.priority_active ? 'Active Preemption' : 'Normal')}</strong></span>
               </div>
             </div>
           </div>

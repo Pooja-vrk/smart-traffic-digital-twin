@@ -43,6 +43,17 @@ export const getSimulationResult = async () => {
   return response.data;
 };
 
+export const triggerEmergencyVehicle = async (data, simulationId = null) => {
+  const url = simulationId ? `/api/simulation/${simulationId}/emergency` : '/api/simulation/emergency';
+  const response = await api.post(url, data);
+  return response.data;
+};
+
+export const getEmergencyStatus = async () => {
+  const response = await api.get('/api/simulation/emergency/status');
+  return response.data;
+};
+
 export const getSimulationHistory = async (params = {}) => {
   const response = await api.get('/api/simulation/history', { params });
   return response.data;

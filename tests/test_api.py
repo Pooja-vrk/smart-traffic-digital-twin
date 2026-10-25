@@ -422,3 +422,134 @@ def test_websocket_traffic_update_vehicles_data(client: TestClient):
         client.post("/api/simulation/stop")
         assert received_traffic_update, "Expected at least one traffic_update on WebSocket"
 
+
+def test_emergency_endpoint_when_simulation_not_running(client: TestClient):
+    """Verify POST /api/simulation/emergency returns 409 Conflict when simulation is idle."""
+    resp = client.post(
+        "/api/simulation/emergency",
+        json={"vehicle_type": "ambulance", "approach": "east"},
+    )
+    assert resp.status_code == 409
+    assert "simulation is not running" in resp.json()["detail"].lower()
+
+
+def test_emergency_endpoint_invalid_inputs(client: TestClient):
+    """Verify input validation rejects unknown vehicle types and approaches with 422."""
+    # Unknown vehicle type
+    resp1 = client.post(
+        "/api/simulation/emergency",
+        json={"vehicle_type": "helicopter", "approach": "east"},
+    )
+    assert resp1.status_code == 422
+
+    # Unknown approach
+    resp2 = client.post(
+        "/api/simulation/emergency",
+        json={"vehicle_type": "ambulance", "approach": "skyward"},
+    )
+    assert resp2.status_code == 422
+
+
+def test_emergency_status_endpoint(client: TestClient):
+    """Verify GET /api/simulation/emergency/status reports status structure."""
+    resp = client.get("/api/simulation/emergency/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "running" in data
+    assert "scheduled" in data
+    assert "emergency" in data
+
+
+def test_emergency_trigger_lifecycle_and_duplicate_prevention(client: TestClient):
+    """Verify emergency vehicle scheduling during running simulation and duplicate prevention."""
+    start_resp = client.post(
+        "/api/simulation/start",
+        json={"controller": "fixed", "steps": 30, "seed": 42},
+    )
+    assert start_resp.status_code == 200
+    sim_id = start_resp.json()["simulation_id"]
+
+    # Allow simulation to begin advancing
+    time.sleep(1.0)
+
+    # Schedule ambulance for step 15
+    em_resp = client.post(
+        "/api/simulation/emergency",
+        json={"vehicle_type": "ambulance", "approach": "east", "spawn_step": 15},
+    )
+    assert em_resp.status_code == 200
+    em_data = em_resp.json()
+    assert em_data["simulation_id"] == sim_id
+    assert em_data["vehicle_type"] == "ambulance"
+    assert em_data["approach"] == "east"
+    assert em_data["spawn_step"] == 15
+    assert em_data["status"] == "scheduled"
+
+    # Verify duplicate emergency request is rejected with 409
+    dup_resp = client.post(
+        "/api/simulation/emergency",
+        json={"vehicle_type": "police", "approach": "north"},
+    )
+    assert dup_resp.status_code == 409
+    assert "already scheduled" in dup_resp.json()["detail"].lower()
+
+    # Verify status reflects scheduled emergency
+    status_resp = client.get("/api/simulation/emergency/status")
+    assert status_resp.status_code == 200
+    sched = status_resp.json()["scheduled"]
+    assert sched is not None
+    assert sched["approach"] == "east"
+
+    # Stop simulation
+    client.post("/api/simulation/stop")
+    time.sleep(0.5)
+
+
+def test_emergency_trigger_spawn_step_exceeds_total(client: TestClient):
+    """Verify spawn_step greater than total_steps is rejected with 422."""
+    start_resp = client.post(
+        "/api/simulation/start",
+        json={"controller": "fixed", "steps": 10, "seed": 42},
+    )
+    assert start_resp.status_code == 200
+
+    time.sleep(0.5)
+
+    em_resp = client.post(
+        "/api/simulation/emergency",
+        json={"vehicle_type": "fire_engine", "approach": "west", "spawn_step": 50},
+    )
+    assert em_resp.status_code == 422
+    assert "exceeds total simulation steps" in em_resp.json()["detail"].lower()
+
+    client.post("/api/simulation/stop")
+    time.sleep(0.5)
+
+
+def test_emergency_simulation_id_path_endpoint(client: TestClient):
+    """Verify POST /api/simulation/{simulation_id}/emergency path validation."""
+    start_resp = client.post(
+        "/api/simulation/start",
+        json={"controller": "fixed", "steps": 25, "seed": 42},
+    )
+    assert start_resp.status_code == 200
+    sim_id = start_resp.json()["simulation_id"]
+    time.sleep(0.5)
+
+    # Call with non-matching simulation ID -> 404
+    wrong_resp = client.post(
+        "/api/simulation/wrong-id/emergency",
+        json={"vehicle_type": "police", "approach": "south"},
+    )
+    assert wrong_resp.status_code == 404
+
+    # Call with correct simulation ID -> 200
+    correct_resp = client.post(
+        f"/api/simulation/{sim_id}/emergency",
+        json={"vehicle_type": "police", "approach": "south", "spawn_step": 12},
+    )
+    assert correct_resp.status_code == 200
+    assert correct_resp.json()["vehicle_type"] == "police"
+
+    client.post("/api/simulation/stop")
+    time.sleep(0.5)

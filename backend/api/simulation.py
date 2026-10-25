@@ -12,6 +12,8 @@ from backend.schemas.simulation import (
     SignalDecisionResponse,
     SimulationResultResponse,
     SimulationRunDetail,
+    EmergencyVehicleRequest,
+    EmergencyVehicleResponse,
     SimulationStartRequest,
     SimulationStartResponse,
     SimulationStatusResponse,
@@ -20,8 +22,10 @@ from backend.schemas.simulation import (
 from backend.services.persistence_service import PersistenceService
 from backend.services.simulation_manager import (
     ControllerNotFoundError,
+    EmergencyAlreadyActiveError,
     ModelNotFoundError,
     SimulationAlreadyRunningError,
+    SimulationNotRunningError,
     sim_manager,
 )
 
@@ -75,6 +79,74 @@ async def start_simulation(request: SimulationStartRequest) -> SimulationStartRe
 async def stop_simulation() -> SimulationStopResponse:
     """Request safe interruption and shutdown of the active simulation session."""
     return sim_manager.stop_simulation()
+
+
+@router.post(
+    "/emergency",
+    response_model=EmergencyVehicleResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Trigger Emergency Vehicle",
+)
+async def trigger_emergency_vehicle(
+    request: EmergencyVehicleRequest,
+) -> EmergencyVehicleResponse:
+    """Dynamically inject an emergency vehicle (ambulance, fire truck, police) into the running simulation.
+
+    The emergency vehicle triggers the 7-stage green corridor priority preemption.
+    """
+    try:
+        response = sim_manager.trigger_emergency_vehicle(request)
+        return response
+    except SimulationNotRunningError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(err),
+        )
+    except EmergencyAlreadyActiveError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(err),
+        )
+    except ValueError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(err),
+        )
+    except Exception as err:
+        logger.error("Failed to trigger emergency vehicle: %s", err, exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal error activating emergency vehicle: {err}",
+        )
+
+
+@router.post(
+    "/{simulation_id}/emergency",
+    response_model=EmergencyVehicleResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Trigger Emergency Vehicle for Simulation ID",
+)
+async def trigger_emergency_vehicle_for_sim(
+    simulation_id: str,
+    request: EmergencyVehicleRequest,
+) -> EmergencyVehicleResponse:
+    """Trigger emergency vehicle for a specific simulation session ID."""
+    status_info = sim_manager.get_status()
+    if status_info.simulation_id != simulation_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Simulation '{simulation_id}' is not the active simulation (active: '{status_info.simulation_id}').",
+        )
+    return await trigger_emergency_vehicle(request)
+
+
+@router.get(
+    "/emergency/status",
+    summary="Get Emergency Vehicle Status",
+)
+async def get_emergency_status() -> dict:
+    """Retrieve current scheduled and active emergency vehicle state."""
+    return sim_manager.get_emergency_status()
 
 
 @router.get(

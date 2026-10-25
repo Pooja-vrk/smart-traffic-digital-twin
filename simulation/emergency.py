@@ -167,6 +167,7 @@ class EmergencyCorridorTracker:
                     or "emergency" in vtype.lower()
                     or "ambulance" in vtype.lower()
                     or "fire" in vtype.lower()
+                    or "police" in vtype.lower()
                     or str(vid).startswith("EV_")
                     or str(vid) == "EV_01"
                 ):

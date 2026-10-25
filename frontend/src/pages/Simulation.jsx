@@ -13,6 +13,7 @@ import {
 import Card               from '../components/common/Card';
 import StatusBadge        from '../components/common/StatusBadge';
 import SimulationControl  from '../components/dashboard/SimulationControl';
+import EmergencyControlPanel from '../components/dashboard/EmergencyControlPanel';
 import SystemStatus       from '../components/dashboard/SystemStatus';
 import DigitalTwinIntersection from '../components/dashboard/DigitalTwinIntersection';
 import AgentStatus        from '../components/dashboard/AgentStatus';
@@ -153,6 +154,11 @@ const Simulation = () => {
             simulationStatus={simulationStatus}
             onStart={handleSimStart}
             startStopPoll={startStopPoll}
+          />
+          <EmergencyControlPanel
+            simulationStatus={simulationStatus}
+            trafficData={trafficData}
+            isConnected={isConnected}
           />
           <SystemStatus
             backend={health ? health.status !== 'error' : null}

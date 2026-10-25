@@ -38,6 +38,51 @@ class SimulationStartRequest(BaseModel):
         default=False,
         description="Whether to launch with graphical SUMO-GUI window (headless otherwise)",
     )
+    emergency_vehicle: bool = Field(
+        default=False,
+        description="Whether to schedule an emergency vehicle during this simulation run",
+    )
+    emergency_vehicle_type: Optional[Literal["ambulance", "fire_engine", "police", "emergency_vehicle"]] = Field(
+        default="ambulance",
+        description="Type of emergency vehicle ('ambulance', 'fire_engine', 'police', 'emergency_vehicle')",
+    )
+    emergency_approach: Optional[Literal["north", "south", "east", "west"]] = Field(
+        default="east",
+        description="Approach corridor for emergency vehicle ('north', 'south', 'east', 'west')",
+    )
+    emergency_step: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Simulation step at which to inject the emergency vehicle",
+    )
+
+
+class EmergencyVehicleRequest(BaseModel):
+    """Request payload to trigger/schedule an emergency vehicle in the running simulation."""
+    vehicle_type: Literal["ambulance", "fire_engine", "police", "emergency_vehicle"] = Field(
+        default="ambulance",
+        description="Emergency vehicle type: 'ambulance', 'fire_engine', 'police', or 'emergency_vehicle'",
+    )
+    approach: Literal["north", "south", "east", "west"] = Field(
+        default="east",
+        description="Inflow approach corridor: 'north', 'south', 'east', or 'west'",
+    )
+    spawn_step: Optional[int] = Field(
+        default=None,
+        ge=0,
+        description="Simulation step to spawn vehicle. If None or <= current step, activates on next step.",
+    )
+
+
+class EmergencyVehicleResponse(BaseModel):
+    """Response returned upon successful emergency vehicle activation/scheduling."""
+    status: str = Field(default="activated", description="Status of the emergency dispatch ('activated' or 'scheduled')")
+    simulation_id: str = Field(..., description="Target active simulation session identifier")
+    vehicle_id: str = Field(default="EV_01", description="Assigned TraCI vehicle ID")
+    vehicle_type: str = Field(..., description="Emergency vehicle type")
+    approach: str = Field(..., description="Corridor approach direction")
+    spawn_step: int = Field(..., description="Simulation step at which vehicle is scheduled to enter")
+    message: str = Field(..., description="Human-readable confirmation message")
 
 
 class SimulationStartResponse(BaseModel):
